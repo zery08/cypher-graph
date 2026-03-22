@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WaferFlow | Precision Analytics</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-fixed-variant": "#3b0002",
+                        "surface-variant": "#dbe4e7",
+                        "on-secondary-fixed-variant": "#455f6b",
+                        "on-surface": "#2b3437",
+                        "error-dim": "#4e0309",
+                        "on-secondary-container": "#3c5561",
+                        "on-primary-fixed-variant": "#005ab1",
+                        "on-tertiary": "#fff7f6",
+                        "error": "#9f403d",
+                        "on-primary-container": "#00519f",
+                        "on-error-container": "#752121",
+                        "primary-fixed-dim": "#c0d5ff",
+                        "secondary-fixed-dim": "#bdd9e6",
+                        "surface-tint": "#005db6",
+                        "inverse-surface": "#0c0f10",
+                        "surface-container-low": "#f1f4f6",
+                        "on-error": "#fff7f6",
+                        "tertiary": "#bb1b21",
+                        "background": "#f8f9fa",
+                        "on-background": "#2b3437",
+                        "outline": "#737c7f",
+                        "secondary": "#49636f",
+                        "secondary-fixed": "#cbe7f5",
+                        "on-primary-fixed": "#003e7e",
+                        "surface-container-highest": "#dbe4e7",
+                        "secondary-dim": "#3d5762",
+                        "tertiary-dim": "#a90816",
+                        "on-tertiary-fixed": "#000000",
+                        "on-tertiary-container": "#1f0001",
+                        "inverse-on-surface": "#9b9d9e",
+                        "primary": "#005db6",
+                        "surface-container-high": "#e3e9ec",
+                        "inverse-primary": "#609efc",
+                        "surface-container-lowest": "#ffffff",
+                        "tertiary-container": "#fe4e49",
+                        "surface": "#f8f9fa",
+                        "primary-dim": "#0051a1",
+                        "on-surface-variant": "#586064",
+                        "secondary-container": "#cbe7f5",
+                        "primary-container": "#d6e3ff",
+                        "on-secondary": "#f2faff",
+                        "primary-fixed": "#d6e3ff",
+                        "surface-container": "#eaeff1",
+                        "surface-dim": "#d1dce0",
+                        "surface-bright": "#f8f9fa",
+                        "outline-variant": "#abb3b7",
+                        "on-secondary-fixed": "#29434e",
+                        "tertiary-fixed": "#fe4e49",
+                        "error-container": "#fe8983",
+                        "on-primary": "#f6f7ff",
+                        "tertiary-fixed-dim": "#ec413e"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #abb3b7; border-radius: 10px; }
+        .tonal-layering-no-borders { border: none !important; }
+        .glass-panel { backdrop-filter: blur(20px); background: rgba(255, 255, 255, 0.8); }
+    </style>
+</head>
+<body class="bg-background text-on-surface selection:bg-primary-container selection:text-on-primary-container overflow-hidden h-screen flex flex-col">
+<!-- TopNavBar (Shared Component) -->
+<header class="fixed top-0 w-full z-50 border-b border-slate-200/50 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-900 shadow-sm dark:shadow-none h-14 px-6 flex justify-between items-center w-full">
+<div class="flex items-center gap-6">
+<span class="text-xl font-bold text-slate-900 dark:text-slate-50 tracking-tighter font-headline">WaferFlow</span>
+<nav class="hidden md:flex items-center space-x-6 font-['Space_Grotesk'] font-medium text-sm tracking-tight">
+<a class="text-blue-700 dark:text-blue-400 border-b-2 border-blue-700 dark:border-blue-400 pb-1" href="#">Explorer</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors" href="#">Metrology</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors" href="#">Recipes</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors" href="#">Analytics</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative hidden lg:block">
+<input class="h-8 w-64 pl-8 pr-4 bg-surface-container-low border-none rounded-sm text-xs focus:ring-1 focus:ring-primary" placeholder="Search wafer ID..." type="text"/>
+<span class="material-symbols-outlined absolute left-2 top-1.5 text-sm text-on-surface-variant">search</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors rounded-sm scale-95 duration-150 ease-in-out">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400 text-[20px]">settings</span>
+</button>
+<button class="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors rounded-sm scale-95 duration-150 ease-in-out">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400 text-[20px]">help</span>
+</button>
+<button class="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors rounded-sm scale-95 duration-150 ease-in-out">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400 text-[20px]">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- SideNavBar (Shared Component) -->
+<aside class="fixed left-0 top-14 h-[calc(100vh-3.5rem)] w-20 flex flex-col items-center py-4 border-r border-slate-200/50 dark:border-slate-800/50 bg-slate-100 dark:bg-slate-950 z-40">
+<div class="flex flex-col space-y-6 items-center flex-1">
+<button class="bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 rounded-lg shadow-sm p-3 translate-x-1 duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">account_tree</span>
+</button>
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all">
+<span class="material-symbols-outlined">table_chart</span>
+</button>
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all">
+<span class="material-symbols-outlined">schema</span>
+</button>
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all relative">
+<span class="material-symbols-outlined">error_outline</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-tertiary rounded-full"></span>
+</button>
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all">
+<span class="material-symbols-outlined">history</span>
+</button>
+</div>
+<div class="flex flex-col space-y-4 items-center mb-4">
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all">
+<span class="material-symbols-outlined">menu_book</span>
+</button>
+<button class="text-slate-400 dark:text-slate-600 p-3 hover:text-slate-900 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-900 rounded-lg transition-all">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</aside>
+<!-- Main Content Layout -->
+<main class="ml-20 mt-14 flex-1 flex overflow-hidden">
+<!-- Left Column: Data Exploration Area (65%) -->
+<section class="w-[65%] flex flex-col bg-surface-container-low border-r border-outline-variant/15">
+<!-- Context Breadcrumbs -->
+<div class="h-10 px-4 flex items-center bg-surface-container-lowest gap-2 text-[10px] font-medium tracking-wide text-on-surface-variant border-b border-outline-variant/10">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">home</span> DASHBOARD</span>
+<span class="material-symbols-outlined text-[12px]">chevron_right</span>
+<span>NEO4J_EXPLORER</span>
+<span class="material-symbols-outlined text-[12px]">chevron_right</span>
+<span class="text-primary font-bold">WF_LOT_772A_METROLOGY</span>
+</div>
+<!-- Top-left: Collapsible Graph Query Panel -->
+<div class="p-4 flex flex-col gap-3">
+<div class="bg-surface-container-lowest rounded shadow-sm overflow-hidden border-l-4 border-primary">
+<div class="p-3 flex justify-between items-center border-b border-outline-variant/10">
+<h2 class="font-headline text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[18px]">terminal</span> Cypher Graph Query
+                        </h2>
+<button class="text-[10px] font-bold text-primary hover:underline">LOAD TEMPLATE</button>
+</div>
+<div class="p-3">
+<div class="font-mono text-[11px] p-3 bg-surface-container-high rounded-sm text-on-surface min-h-[80px]">
+                            MATCH (w:Wafer {id: 'WF_772A'})-[r:PROCESSED_BY]-&gt;(s:Step)<br/>
+                            WHERE s.type = 'LITHOGRAPHY' AND r.overlay_error &gt; 2.5<br/>
+                            RETURN w, r, s LIMIT 25
+                        </div>
+<div class="mt-3 flex flex-wrap gap-2 items-center">
+<div class="flex-1 flex gap-2">
+<select class="text-[10px] h-7 border-outline-variant/30 rounded-sm bg-surface-container-low">
+<option>Wafer ID: WF_772A</option>
+</select>
+<select class="text-[10px] h-7 border-outline-variant/30 rounded-sm bg-surface-container-low">
+<option>Process: Litho_V2</option>
+</select>
+<select class="text-[10px] h-7 border-outline-variant/30 rounded-sm bg-surface-container-low">
+<option>Status: Anomalies Only</option>
+</select>
+</div>
+<div class="flex gap-2">
+<button class="h-7 px-3 bg-surface-container-high text-[10px] font-bold hover:bg-surface-container-highest rounded-sm">RESET</button>
+<button class="h-7 px-4 bg-primary text-on-primary text-[10px] font-bold hover:bg-primary-dim rounded-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">play_arrow</span> RUN QUERY
+                                </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Middle-left: Main Result Workspace -->
+<div class="flex-1 px-4 pb-4 overflow-hidden flex flex-col">
+<div class="flex-1 bg-surface-container-lowest rounded shadow-sm flex flex-col overflow-hidden">
+<!-- Tabs -->
+<div class="flex border-b border-outline-variant/10">
+<button class="px-6 py-2 text-[11px] font-bold border-b-2 border-primary text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">hub</span> GRAPH VIEW
+                        </button>
+<button class="px-6 py-2 text-[11px] font-bold text-on-surface-variant hover:text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">table_rows</span> TABLE VIEW
+                        </button>
+<button class="px-6 py-2 text-[11px] font-bold text-on-surface-variant hover:text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">monitoring</span> CHART VIEW
+                        </button>
+</div>
+<!-- Graph Canvas Placeholder -->
+<div class="flex-1 relative bg-[#fdfdfd] overflow-hidden">
+<div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#000 1px, transparent 1px); background-size: 20px 20px;"></div>
+<!-- Mock Graph Nodes -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full p-10 flex items-center justify-center">
+<div class="relative w-full h-full">
+<!-- Node: Wafer -->
+<div class="absolute top-[20%] left-[30%] p-3 bg-primary-container border border-primary/20 rounded shadow-md z-10 flex flex-col items-center">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">album</span>
+<span class="text-[9px] font-bold mt-1">WAFER: WF_772A</span>
+</div>
+<!-- Node: Step (Anomaly) -->
+<div class="absolute top-[50%] left-[60%] p-3 bg-tertiary-container border border-tertiary/20 rounded shadow-md z-10 flex flex-col items-center">
+<span class="material-symbols-outlined text-tertiary" style="font-variation-settings: 'FILL' 1;">precision_manufacturing</span>
+<span class="text-[9px] font-bold mt-1">STEP: LITHO_V2</span>
+</div>
+<!-- Node: Metrology -->
+<div class="absolute top-[70%] left-[35%] p-3 bg-secondary-container border border-secondary/20 rounded shadow-md z-10 flex flex-col items-center">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">analytics</span>
+<span class="text-[9px] font-bold mt-1">METRO: MTR_X9</span>
+</div>
+<!-- SVG Connections -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none">
+<line stroke="#005db6" stroke-dasharray="4" stroke-width="2" x1="33%" x2="60%" y1="28%" y2="52%"></line>
+<line stroke="#abb3b7" stroke-width="1" x1="60%" x2="38%" y1="58%" y2="72%"></line>
+<line stroke="#abb3b7" stroke-width="1" x1="33%" x2="38%" y1="28%" y2="72%"></line>
+</svg>
+</div>
+</div>
+<!-- Canvas Controls -->
+<div class="absolute bottom-4 right-4 flex flex-col gap-2">
+<button class="w-8 h-8 bg-surface-container-lowest border border-outline-variant/20 rounded shadow flex items-center justify-center text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+<button class="w-8 h-8 bg-surface-container-lowest border border-outline-variant/20 rounded shadow flex items-center justify-center text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[18px]">remove</span>
+</button>
+<button class="w-8 h-8 bg-surface-container-lowest border border-outline-variant/20 rounded shadow flex items-center justify-center text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[18px]">fullscreen</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom-left: Detail Panel -->
+<div class="h-48 px-4 pb-4">
+<div class="h-full bg-surface-container-high rounded shadow-inner p-4 grid grid-cols-3 gap-6 overflow-y-auto">
+<div class="col-span-1">
+<h3 class="text-[10px] font-bold text-on-surface-variant uppercase mb-2">Selected Node Metadata</h3>
+<div class="space-y-1">
+<div class="flex justify-between text-[11px] border-b border-outline-variant/10 pb-1">
+<span class="text-on-surface-variant">Entity Type:</span>
+<span class="font-semibold">ProcessStep</span>
+</div>
+<div class="flex justify-between text-[11px] border-b border-outline-variant/10 pb-1">
+<span class="text-on-surface-variant">Step ID:</span>
+<span class="font-semibold">LITHO_V2</span>
+</div>
+<div class="flex justify-between text-[11px]">
+<span class="text-on-surface-variant">Timestamp:</span>
+<span class="font-semibold text-primary">2023-10-24 14:22:01</span>
+</div>
+</div>
+</div>
+<div class="col-span-1">
+<h3 class="text-[10px] font-bold text-on-surface-variant uppercase mb-2">Metrology Summaries</h3>
+<div class="p-2 bg-tertiary/10 rounded-sm border-l-2 border-tertiary">
+<div class="text-[10px] font-bold text-tertiary mb-1">ANOMALY DETECTED</div>
+<div class="text-[11px] font-medium leading-tight text-on-surface">Overlay Error: 2.87nm exceeds control limit (2.5nm)</div>
+</div>
+</div>
+<div class="col-span-1">
+<h3 class="text-[10px] font-bold text-on-surface-variant uppercase mb-2">Related Entities</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-2 py-0.5 bg-surface-container-lowest border border-outline-variant/20 rounded-full text-[9px] font-bold">LOT_772A</span>
+<span class="px-2 py-0.5 bg-surface-container-lowest border border-outline-variant/20 rounded-full text-[9px] font-bold">EQUIP_ASML_04</span>
+<span class="px-2 py-0.5 bg-surface-container-lowest border border-outline-variant/20 rounded-full text-[9px] font-bold">REC_FINE_LITH</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Chat Area (35%) -->
+<section class="w-[35%] flex flex-col bg-surface-container-lowest relative">
+<!-- Chat Header -->
+<div class="h-10 px-4 flex items-center justify-between border-b border-outline-variant/10 bg-surface-container-lowest z-10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[18px]">neurology</span>
+<h2 class="font-headline text-xs font-bold uppercase tracking-widest">Process AI Analyst</h2>
+</div>
+<div class="flex gap-1">
+<button class="p-1 hover:bg-surface-container-low rounded"><span class="material-symbols-outlined text-[16px]">more_vert</span></button>
+</div>
+</div>
+<!-- Conversation History -->
+<div class="flex-1 overflow-y-auto p-4 space-y-4">
+<!-- Welcome Chips -->
+<div class="space-y-3 pb-4">
+<p class="text-[11px] text-on-surface-variant italic px-2">Hello! I'm your semiconductor process co-pilot. How can I help with your wafer data today?</p>
+<div class="flex flex-wrap gap-2">
+<button class="px-3 py-1.5 bg-surface-container-low hover:bg-surface-container-high rounded text-[10px] font-medium border border-outline-variant/10 transition-all">"Explain anomaly in Litho step"</button>
+<button class="px-3 py-1.5 bg-surface-container-low hover:bg-surface-container-high rounded text-[10px] font-medium border border-outline-variant/10 transition-all">"Compare Lot 772A with 771B"</button>
+<button class="px-3 py-1.5 bg-surface-container-low hover:bg-surface-container-high rounded text-[10px] font-medium border border-outline-variant/10 transition-all">"Optimize recipe for yield"</button>
+</div>
+</div>
+<!-- LLM Bubble -->
+<div class="flex gap-3 max-w-[90%]">
+<div class="w-6 h-6 rounded-sm bg-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[14px] text-on-primary">smart_toy</span>
+</div>
+<div class="bg-surface-container-high p-3 rounded-md text-[11px] text-on-surface leading-relaxed shadow-sm">
+                        Based on the current Neo4j graph result, I see an anomaly in <span class="font-bold">LITHO_V2</span> for Wafer <span class="font-bold">WF_772A</span>. The overlay error (2.87nm) is correlated with a temperature spike at the equipment sensor level recorded 4 minutes prior to processing.
+                    </div>
+</div>
+<!-- User Bubble -->
+<div class="flex flex-row-reverse gap-3 max-w-[90%] ml-auto">
+<div class="w-6 h-6 rounded-sm bg-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[14px] text-on-primary">person</span>
+</div>
+<div class="bg-primary-container p-3 rounded-md text-[11px] text-on-primary-container leading-relaxed shadow-sm">
+                        Show me the metrology history for this equipment over the last 24 hours.
+                    </div>
+</div>
+<!-- LLM Thinking/Action State -->
+<div class="flex gap-3 max-w-[90%]">
+<div class="w-6 h-6 rounded-sm bg-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[14px] text-on-primary">smart_toy</span>
+</div>
+<div class="space-y-2">
+<div class="flex items-center gap-2 text-[10px] text-primary font-bold">
+<span class="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
+                            QUERYING KNOWLEDGE GRAPH...
+                        </div>
+<div class="bg-surface-container-high p-3 rounded-md text-[11px] text-on-surface leading-relaxed shadow-sm">
+                            I've updated the chart view on your workspace with the 24-hour sensor telemetry for <span class="font-bold">EQUIP_ASML_04</span>. There's a clear drift trend starting at 09:00 UTC.
+                        </div>
+</div>
+</div>
+</div>
+<!-- Chat Input Area -->
+<div class="p-4 border-t border-outline-variant/10 bg-surface-container-lowest">
+<!-- Compact Action Chips -->
+<div class="flex gap-2 mb-3">
+<button class="h-6 px-2 bg-secondary-container text-on-secondary-container text-[9px] font-bold rounded-sm flex items-center gap-1 hover:bg-secondary-fixed-dim">
+<span class="material-symbols-outlined text-[12px]">dataset</span> USE CURRENT GRAPH
+                    </button>
+<button class="h-6 px-2 bg-secondary-container text-on-secondary-container text-[9px] font-bold rounded-sm flex items-center gap-1 hover:bg-secondary-fixed-dim">
+<span class="material-symbols-outlined text-[12px]">info</span> EXPLAIN SELECTED
+                    </button>
+</div>
+<div class="relative bg-surface-container-low rounded-sm border border-outline-variant/20 focus-within:border-primary transition-all">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-[11px] p-3 min-h-[80px] resize-none" placeholder="Ask about process flows or recipe anomalies..." rows="3"></textarea>
+<div class="absolute bottom-2 right-2 flex gap-1">
+<button class="p-1.5 text-on-surface-variant hover:text-error transition-colors"><span class="material-symbols-outlined text-[18px]">stop_circle</span></button>
+<button class="p-1.5 text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[18px]">delete_sweep</span></button>
+<button class="ml-2 w-8 h-8 bg-primary text-on-primary rounded-sm flex items-center justify-center shadow-md hover:bg-primary-dim">
+<span class="material-symbols-outlined text-[20px]">send</span>
+</button>
+</div>
+</div>
+<div class="mt-2 text-center">
+<span class="text-[9px] text-on-surface-variant uppercase tracking-tighter">WaferFlow AI v1.0.4 | Precision LLM Engine</span>
+</div>
+</div>
+</section>
+</main>
+<!-- FAB Suppression: Contextually suppressed as per mandate for detailed analysis screen -->
+<!-- The layout follows a "no-line" rule by using tonal shifts for sectioning -->
+</body></html>
