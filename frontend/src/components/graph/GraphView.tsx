@@ -96,22 +96,19 @@ const CY_STYLE: any[] = [
   {
     selector: 'edge',
     style: {
-      'line-color': '#475569',
-      'target-arrow-color': '#64748b',
+      'line-color': '#334155',
+      'target-arrow-color': '#475569',
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 1,
+      'arrow-scale': 0.9,
       'curve-style': 'bezier',
-      'width': 1.5,
-      'line-opacity': 0.6,
+      'width': 1.2,
+      'line-opacity': 0.5,
       'label': 'data(label)',
       'font-size': 9,
       'font-family': 'ui-sans-serif, system-ui, sans-serif',
-      'color': '#94a3b8',
+      'color': '#64748b',
       'text-rotation': 'autorotate',
-      'text-background-color': '#1e293b',
-      'text-background-opacity': 0.9,
-      'text-background-padding': '3px',
-      'text-background-shape': 'roundrectangle',
+      'text-background-opacity': 0,
       'min-zoomed-font-size': 8,
       'overlay-opacity': 0,
     },
@@ -119,24 +116,24 @@ const CY_STYLE: any[] = [
   {
     selector: 'edge:selected',
     style: {
-      'line-color': '#38bdf8',
-      'target-arrow-color': '#38bdf8',
-      'width': 2.5,
-      'line-opacity': 1,
+      'line-color': '#475569',
+      'target-arrow-color': '#475569',
+      'width': 2,
+      'line-opacity': 0.9,
       'overlay-opacity': 0,
     },
   },
   {
     selector: '.faded',
-    style: { 'opacity': 0.08 },
+    style: { 'opacity': 0.07 },
   },
   {
     selector: '.highlighted',
     style: {
-      'line-color': 'data(sourceColor)',
-      'target-arrow-color': 'data(sourceColor)',
-      'width': 2.5,
-      'line-opacity': 1,
+      'line-color': '#475569',
+      'target-arrow-color': '#475569',
+      'width': 2,
+      'line-opacity': 0.85,
       'overlay-opacity': 0,
     },
   },
@@ -197,9 +194,8 @@ export function GraphView() {
       cy.elements().addClass('faded').removeClass('highlighted neighbor')
       node.removeClass('faded')
       node.neighborhood().removeClass('faded')
-      // 연결된 엣지 강조 (노드 색상으로)
-      const borderColor = node.data('border') as string
-      node.connectedEdges().removeClass('faded').addClass('highlighted').data('sourceColor', borderColor)
+      // 연결된 엣지 강조
+      node.connectedEdges().removeClass('faded').addClass('highlighted')
       // 이웃 노드 강조
       node.neighborhood('node').addClass('neighbor')
       const d = node.data() as { id: string; labels: string[]; properties: Record<string, unknown> }
