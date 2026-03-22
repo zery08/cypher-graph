@@ -1,4 +1,4 @@
-# RCP Cypher — 반도체 공정 데이터 탐색 워크스페이스
+# RCP Cypher
 
 Neo4j에 저장된 **wafer / recipe / metrology 데이터**를 그래프, 테이블, 차트, AI 채팅으로 함께 탐색하는 웹 애플리케이션입니다.
 
