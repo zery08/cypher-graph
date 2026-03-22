@@ -1,0 +1,26 @@
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: graph-chat-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/wafergraph123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_default__listen__address: 0.0.0.0
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    volumes:
+      - neo4j_data:/data
+      - ./neo4j/seed:/seed:ro
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p wafergraph123 'RETURN 1;' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+volumes:
+  neo4j_data:

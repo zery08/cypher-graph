@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# uv
+backend/.venv/
+
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/electron-dist/
+
+# 환경변수
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 로그
+*.log
+logs/
+
+# Neo4j 볼륨 (Docker 로컬 데이터)
+neo4j/data/
