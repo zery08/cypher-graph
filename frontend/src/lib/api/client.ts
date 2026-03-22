@@ -104,4 +104,36 @@ export async function checkHealth(): Promise<HealthResponse> {
   return HealthResponseSchema.parse(res.data)
 }
 
+// ─── 대화 기록 API ────────────────────────────────────────────────────────────
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  actions?: unknown[]
+  tool_results?: unknown
+  created_at: string
+}
+
+export async function fetchConversations(): Promise<ConversationSummary[]> {
+  const res = await api.get('/conversations')
+  return res.data as ConversationSummary[]
+}
+
+export async function fetchConversationMessages(id: string): Promise<ConversationMessage[]> {
+  const res = await api.get(`/conversations/${id}/messages`)
+  return res.data as ConversationMessage[]
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  await api.delete(`/conversations/${id}`)
+}
+
 export default api

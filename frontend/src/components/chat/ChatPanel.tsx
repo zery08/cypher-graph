@@ -6,8 +6,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useChatStore } from '@/store/useChatStore'
 import { useWorkspaceStore } from '@/store/useWorkspaceStore'
-import { streamChatMessage } from '@/lib/api/client'
+import { streamChatMessage, fetchConversationMessages } from '@/lib/api/client'
 import type { ChatMessage, ChatAction, StepInfo } from '@/lib/schemas'
+import { ConversationHistory } from './ConversationHistory'
 
 // ─── 액션 chip 렌더러 ─────────────────────────────────────────────────────────
 
@@ -302,6 +303,22 @@ export function ChatPanel() {
     }
   }
 
+  async function handleLoadConversation(conversationId: string) {
+    try {
+      const msgs = await fetchConversationMessages(conversationId)
+      useChatStore.getState().clearMessages()
+      for (const m of msgs) {
+        addMessage({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          actions: (m.actions ?? []) as ChatAction[],
+        })
+      }
+    } catch (err) {
+      console.error('대화 불러오기 실패:', err)
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -317,16 +334,19 @@ export function ChatPanel() {
           <h2 className="text-sm font-medium">AI 분석 어시스턴트</h2>
           <p className="text-xs text-muted-foreground">wafer / recipe / metrology 데이터 탐색</p>
         </div>
-        {messages.length > 0 && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => useChatStore.getState().clearMessages()}
-          >
-            <X className="w-3 h-3" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          <ConversationHistory onLoad={handleLoadConversation} />
+          {messages.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => useChatStore.getState().clearMessages()}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* 컨텍스트 배너 */}
