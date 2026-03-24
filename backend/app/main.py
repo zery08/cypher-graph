@@ -11,7 +11,6 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.api.routes import health, chat, graph, auth, conversations
 
-# 프록시 우회 강제 (LLM/DB 등 내부 통신 안정화)
 os.environ["no_proxy"] = "*"
 os.environ["NO_PROXY"] = "*"
 

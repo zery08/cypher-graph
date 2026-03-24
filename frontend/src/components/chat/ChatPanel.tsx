@@ -105,6 +105,12 @@ function MessageBubble({ role, content, thinking, actions, steps, onAction }: Me
         </div>
       )}
       {!isUser && <StepsList steps={steps ?? []} />}
+      {!isUser && thinking && (
+        <div className="max-w-[90%] rounded-lg px-3 py-2 text-xs leading-relaxed border border-border/50 bg-background/60 text-muted-foreground whitespace-pre-wrap break-words">
+          <div className="font-medium mb-1 text-foreground/80">추론</div>
+          {thinking}
+        </div>
+      )}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser
