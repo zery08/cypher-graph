@@ -57,6 +57,38 @@ def _extract_text_content(content: object) -> str:
     return ""
 
 
+def _extract_reasoning_content(content: object) -> str:
+    """thinking/reasoning 블록 텍스트를 추출한다."""
+    if isinstance(content, str):
+        return ""
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type not in ("reasoning", "thinking"):
+                continue
+            text = block.get("text")
+            if isinstance(text, str):
+                chunks.append(text)
+                continue
+            # provider별 필드 호환
+            reasoning = block.get("reasoning")
+            if isinstance(reasoning, str):
+                chunks.append(reasoning)
+                continue
+            content_items = block.get("content")
+            if isinstance(content_items, list):
+                for item in content_items:
+                    if isinstance(item, dict):
+                        item_text = item.get("text")
+                        if isinstance(item_text, str):
+                            chunks.append(item_text)
+        return "".join(chunks)
+    return ""
+
+
 def _build_agent():
     """coordinator agent 빌드"""
     llm = get_coordinator_llm()
@@ -139,9 +171,11 @@ async def run_coordinator(
         # 마지막 AIMessage에서 최종 답변 추출
         response_messages = response.get("messages", [])
         answer = ""
+        thinking = ""
         for msg in reversed(response_messages):
             if isinstance(msg, AIMessage) and msg.content:
                 answer = _extract_text_content(msg.content)
+                thinking = _extract_reasoning_content(msg.content)
                 break
 
         # 중간 단계 수집 (AIMessage tool_calls + ToolMessage 쌍)
@@ -230,6 +264,7 @@ async def run_coordinator(
             actions=actions,
             tool_results=tool_result,
             steps=steps,
+            thinking=thinking or None,
         )
 
     except Exception as e:
@@ -257,6 +292,7 @@ async def stream_coordinator(
     steps: list[StepInfo] = []
     all_actions: list[ChatAction] = []
     final_tool_result = ToolResult()
+    final_thinking = ""
     step_inputs: dict[str, str] = {}   # run_id → input
     tools_running = 0
 
@@ -313,9 +349,13 @@ async def stream_coordinator(
             elif kind == "on_chat_model_stream" and tools_running == 0:
                 chunk = event["data"].get("chunk")
                 if chunk:
-                    content = _extract_text_content(getattr(chunk, "content", ""))
-                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
-                    if content and not tool_call_chunks:
+                    chunk_content = getattr(chunk, "content", "")
+                    content = _extract_text_content(chunk_content)
+                    reasoning = _extract_reasoning_content(chunk_content)
+                    if reasoning:
+                        final_thinking += reasoning
+                        yield json.dumps({"type": "thinking_token", "content": reasoning}, ensure_ascii=False)
+                    if content:
                         yield json.dumps({"type": "token", "content": content}, ensure_ascii=False)
 
         yield json.dumps({
@@ -323,6 +363,7 @@ async def stream_coordinator(
             "actions": [a.model_dump() for a in all_actions],
             "tool_results": final_tool_result.model_dump(),
             "steps": [s.model_dump() for s in steps],
+            "thinking": final_thinking or None,
         }, ensure_ascii=False)
 
     except Exception as e:
