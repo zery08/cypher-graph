@@ -45,7 +45,6 @@ export function QueryPanel() {
     setGraphResult,
     setTableRows,
     setActiveTab,
-    lastToolSummary,
     activeFilters,
   } = useWorkspaceStore()
 
@@ -131,19 +130,34 @@ export function QueryPanel() {
         </Button>
       </div>
 
-      {/* 프리셋 버튼 */}
-      <div className="flex flex-wrap gap-1 px-3 pt-2">
-        {PRESET_QUERIES.map((p) => (
-          <Button
-            key={p.label}
-            variant="outline"
-            size="sm"
-            className="h-6 text-xs px-2"
-            onClick={() => handlePreset(p.query)}
-          >
-            {p.label}
-          </Button>
-        ))}
+      {/* 프리셋 버튼 + 실행 버튼 */}
+      <div className="flex items-start justify-between gap-2 px-3 pt-2">
+        <div className="flex flex-wrap gap-1">
+          {PRESET_QUERIES.map((p) => (
+            <Button
+              key={p.label}
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={() => handlePreset(p.query)}
+            >
+              {p.label}
+            </Button>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          className="h-7 text-xs gap-1 shrink-0"
+          onClick={() => void handleRun()}
+          disabled={isQueryRunning || !localQuery.trim()}
+        >
+          {isQueryRunning ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <Play className="w-3 h-3" />
+          )}
+          실행
+        </Button>
       </div>
 
       {/* 쿼리 입력 */}
@@ -156,28 +170,6 @@ export function QueryPanel() {
           className="font-mono text-xs min-h-[80px] resize-none bg-muted/30"
           spellCheck={false}
         />
-        <div className="flex items-center justify-between mt-2">
-          {lastToolSummary ? (
-            <span className="text-xs text-muted-foreground truncate max-w-[70%]">
-              {lastToolSummary}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Ctrl+Enter로 실행</span>
-          )}
-          <Button
-            size="sm"
-            className="h-7 text-xs gap-1"
-            onClick={() => void handleRun()}
-            disabled={isQueryRunning || !localQuery.trim()}
-          >
-            {isQueryRunning ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Play className="w-3 h-3" />
-            )}
-            실행
-          </Button>
-        </div>
       </div>
     </div>
   )

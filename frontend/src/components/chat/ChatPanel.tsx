@@ -44,29 +44,12 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
 
 // ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
-function ReasoningBlock({ reasoning }: { reasoning: string }) {
+function StepsList({ steps, reasoning }: { steps: StepInfo[]; reasoning?: string | null }) {
   const [open, setOpen] = useState(false)
-  return (
-    <div className="text-xs mb-1">
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1 text-amber-600/70 hover:text-amber-600 transition-colors"
-      >
-        <ChevronRight className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span className="font-medium">추론 과정</span>
-      </button>
-      {open && (
-        <div className="mt-1 px-2 py-1.5 bg-amber-50/60 border border-amber-200/50 rounded text-amber-800/80 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
-          {reasoning}
-        </div>
-      )}
-    </div>
-  )
-}
+  const hasSteps = steps.length > 0
+  const toolSummary = steps.map((s) => s.tool).join(', ')
 
-function StepsList({ steps }: { steps: StepInfo[] }) {
-  const [open, setOpen] = useState(false)
-  if (!steps || steps.length === 0) return null
+  if (!hasSteps && !reasoning) return null
 
   return (
     <div className="max-w-[90%] text-xs">
@@ -75,27 +58,34 @@ function StepsList({ steps }: { steps: StepInfo[] }) {
         className="flex items-center gap-1.5 text-muted-foreground/70 hover:text-muted-foreground transition-colors mb-1"
       >
         <ChevronRight className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span>{steps.length}개 도구 사용됨 — {steps.map(s => s.tool).join(', ')}</span>
+        <span>
+          실행 과정
+          {hasSteps ? ` — ${steps.length}개 도구 사용됨` : ''}
+          {toolSummary ? ` · ${toolSummary}` : ''}
+        </span>
       </button>
 
       {open && (
         <div className="flex flex-col gap-2 pl-4 border-l border-border/50">
+          {reasoning && (
+            <div className="bg-amber-50/60 border border-amber-200/50 rounded px-2 py-1.5 text-amber-800/80 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
+              <div className="font-medium text-amber-700/80 mb-1">추론 과정</div>
+              {reasoning}
+            </div>
+          )}
           {steps.map((step, i) => (
-            <div key={i} className="space-y-1">
-              {step.reasoning && <ReasoningBlock reasoning={step.reasoning} />}
-              <div className="bg-muted/30 rounded p-2 space-y-1">
-                <div className="font-medium text-muted-foreground flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
-                  {step.tool}
+            <div key={i} className="bg-muted/30 rounded p-2 space-y-1">
+              <div className="font-medium text-muted-foreground flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                {step.tool}
+              </div>
+              {step.input && (
+                <div className="text-muted-foreground/60 whitespace-pre-wrap break-words">
+                  입력: {step.input}
                 </div>
-                {step.input && (
-                  <div className="text-muted-foreground/60 whitespace-pre-wrap break-words">
-                    입력: {step.input}
-                  </div>
-                )}
-                <div className="text-muted-foreground/80 whitespace-pre-wrap break-words">
-                  {step.output}
-                </div>
+              )}
+              <div className="text-muted-foreground/80 whitespace-pre-wrap break-words">
+                {step.output}
               </div>
             </div>
           ))}
@@ -121,8 +111,7 @@ function MessageBubble({ role, content, actions, steps, reasoning, onAction }: M
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      {!isUser && reasoning && <ReasoningBlock reasoning={reasoning} />}
-      {!isUser && <StepsList steps={steps ?? []} />}
+      {!isUser && <StepsList steps={steps ?? []} reasoning={reasoning} />}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser

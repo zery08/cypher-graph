@@ -36,7 +36,7 @@ function HealthBadge() {
 // ─── 탭 헤더 ─────────────────────────────────────────────────────────────────
 
 const HEADER_H = 40    // px
-const DETAIL_H = 140   // px
+const DETAIL_H = 280   // px
 const TAB_HDR_H = 38   // px (탭 버튼 헤더)
 
 // ─── App 컴포넌트 ─────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export default function App() {
               {activeTab === 'chart' && <ChartView />}
             </div>
 
-            {/* 하단 상세 패널 (200px 고정) */}
+            {/* 하단 상세 패널 (280px 고정) */}
             <div
               style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: DETAIL_H }}
               className="border-t border-border"
