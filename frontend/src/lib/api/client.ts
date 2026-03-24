@@ -38,8 +38,9 @@ export async function sendChatMessage(
 export type StreamEvent =
   | { type: 'step_start'; tool: string; tool_key: string; input: string }
   | { type: 'step_end'; tool_key: string; output: string }
+  | { type: 'thinking_token'; content: string }
   | { type: 'token'; content: string }
-  | { type: 'done'; actions: ChatAction[]; tool_results: ToolResult; steps: StepInfo[] }
+  | { type: 'done'; actions: ChatAction[]; tool_results: ToolResult; steps: StepInfo[]; thinking?: string | null }
   | { type: 'error'; content: string }
 
 export async function* streamChatMessage(

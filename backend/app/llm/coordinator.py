@@ -33,15 +33,16 @@ TOOL_LABELS = {
 }
 
 
-def _extract_text_content(content: object) -> str:
-    """LangChain/OpenAI 호환 content 블록에서 사용자에게 보여줄 텍스트만 추출한다."""
+def _extract_content_parts(content: object) -> tuple[str, str]:
+    """LangChain/OpenAI 호환 content 블록에서 (answer, thinking)을 추출한다."""
     if isinstance(content, str):
-        return content
+        return content, ""
     if isinstance(content, list):
-        chunks: list[str] = []
+        answer_chunks: list[str] = []
+        thinking_chunks: list[str] = []
         for block in content:
             if isinstance(block, str):
-                chunks.append(block)
+                answer_chunks.append(block)
                 continue
             if not isinstance(block, dict):
                 continue
@@ -49,11 +50,39 @@ def _extract_text_content(content: object) -> str:
             if block_type in ("text", "output_text"):
                 text = block.get("text")
                 if isinstance(text, str):
-                    chunks.append(text)
-            elif block_type == "reasoning":
-                # reasoning 블록은 사용자 응답에 노출하지 않음
-                continue
-        return "".join(chunks)
+                    answer_chunks.append(text)
+            elif block_type in ("reasoning", "reasoning_content"):
+                # thinking 모델의 추론 블록
+                text = block.get("text")
+                if isinstance(text, str):
+                    thinking_chunks.append(text)
+
+                summary = block.get("summary")
+                if isinstance(summary, list):
+                    for s in summary:
+                        if isinstance(s, dict):
+                            sum_text = s.get("text")
+                            if isinstance(sum_text, str):
+                                thinking_chunks.append(sum_text)
+        return "".join(answer_chunks), "".join(thinking_chunks)
+    return "", ""
+
+
+def _extract_reasoning_from_message(msg: AIMessage) -> str:
+    """AIMessage의 provider별 additional kwargs에서 reasoning 텍스트를 추출한다."""
+    additional = getattr(msg, "additional_kwargs", {}) or {}
+    candidates = [
+        additional.get("reasoning_content"),
+        additional.get("reasoning"),
+        additional.get("thinking"),
+    ]
+    for item in candidates:
+        if isinstance(item, str) and item.strip():
+            return item
+        if isinstance(item, list):
+            texts = [x for x in item if isinstance(x, str)]
+            if texts:
+                return "".join(texts)
     return ""
 
 
@@ -139,10 +168,14 @@ async def run_coordinator(
         # 마지막 AIMessage에서 최종 답변 추출
         response_messages = response.get("messages", [])
         answer = ""
+        thinking = ""
         for msg in reversed(response_messages):
             if isinstance(msg, AIMessage) and msg.content:
-                answer = _extract_text_content(msg.content)
-                break
+                extracted_answer, extracted_thinking = _extract_content_parts(msg.content)
+                answer = extracted_answer or answer
+                thinking = extracted_thinking or _extract_reasoning_from_message(msg) or thinking
+                if answer:
+                    break
 
         # 중간 단계 수집 (AIMessage tool_calls + ToolMessage 쌍)
         TOOL_LABELS = {
@@ -230,6 +263,7 @@ async def run_coordinator(
             actions=actions,
             tool_results=tool_result,
             steps=steps,
+            thinking=thinking or None,
         )
 
     except Exception as e:
@@ -257,6 +291,7 @@ async def stream_coordinator(
     steps: list[StepInfo] = []
     all_actions: list[ChatAction] = []
     final_tool_result = ToolResult()
+    collected_thinking: list[str] = []
     step_inputs: dict[str, str] = {}   # run_id → input
     tools_running = 0
 
@@ -313,8 +348,11 @@ async def stream_coordinator(
             elif kind == "on_chat_model_stream" and tools_running == 0:
                 chunk = event["data"].get("chunk")
                 if chunk:
-                    content = _extract_text_content(getattr(chunk, "content", ""))
+                    content, thinking = _extract_content_parts(getattr(chunk, "content", ""))
                     tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
+                    if thinking:
+                        collected_thinking.append(thinking)
+                        yield json.dumps({"type": "thinking_token", "content": thinking}, ensure_ascii=False)
                     if content and not tool_call_chunks:
                         yield json.dumps({"type": "token", "content": content}, ensure_ascii=False)
 
@@ -323,6 +361,7 @@ async def stream_coordinator(
             "actions": [a.model_dump() for a in all_actions],
             "tool_results": final_tool_result.model_dump(),
             "steps": [s.model_dump() for s in steps],
+            "thinking": "".join(collected_thinking) or None,
         }, ensure_ascii=False)
 
     except Exception as e:

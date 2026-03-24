@@ -24,6 +24,7 @@ interface ChatState {
   addMessage: (entry: Omit<ChatEntry, 'id' | 'timestamp'>) => string
   addStreamingMessage: () => string
   appendToken: (id: string, token: string) => void
+  appendThinking: (id: string, token: string) => void
   updateMessage: (id: string, updates: Partial<Omit<ChatEntry, 'id' | 'timestamp'>>) => void
   setLoading: (loading: boolean) => void
   setContextSnapshot: (snapshot: string | null) => void
@@ -67,6 +68,13 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => ({
       messages: state.messages.map((m) =>
         m.id === id ? { ...m, content: m.content + token } : m
+      ),
+    })),
+
+  appendThinking: (id, token) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, thinking: (m.thinking ?? '') + token } : m
       ),
     })),
 

@@ -87,17 +87,24 @@ function StepsList({ steps }: { steps: StepInfo[] }) {
 interface MessageBubbleProps {
   role: 'user' | 'assistant'
   content: string
+  thinking?: string
   actions?: ChatAction[]
   steps?: StepInfo[]
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, actions, steps, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, thinking, actions, steps, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
       {!isUser && <StepsList steps={steps ?? []} />}
+      {!isUser && thinking && (
+        <div className="max-w-[90%] rounded-lg px-3 py-2 text-xs leading-relaxed border border-border/50 bg-background/60 text-muted-foreground whitespace-pre-wrap break-words">
+          <div className="font-medium mb-1 text-foreground/80">추론</div>
+          {thinking}
+        </div>
+      )}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser
@@ -142,6 +149,7 @@ export function ChatPanel() {
     addMessage,
     addStreamingMessage,
     appendToken,
+    appendThinking,
     updateMessage,
     setLoading,
     contextSnapshot,
@@ -244,6 +252,8 @@ export function ChatPanel() {
       for await (const event of streamChatMessage(text, history, context)) {
         if (event.type === 'token') {
           appendToken(assistantId, event.content)
+        } else if (event.type === 'thinking_token') {
+          appendThinking(assistantId, event.content)
         } else if (event.type === 'step_start') {
           // 진행 중인 step을 임시로 표시
           const step: StepInfo = { tool: event.tool, tool_key: event.tool_key, input: event.input, output: '...' }
@@ -265,6 +275,7 @@ export function ChatPanel() {
             actions,
             steps: event.steps,
             toolResults: toolResults ?? undefined,
+            thinking: event.thinking ?? undefined,
           })
 
           // tool 결과 반영
@@ -384,6 +395,7 @@ export function ChatPanel() {
               key={msg.id}
               role={msg.role}
               content={msg.content}
+              thinking={msg.thinking}
               actions={msg.actions}
               steps={msg.steps}
               onAction={handleAction}

@@ -3,12 +3,17 @@ WaferFlow 백엔드 FastAPI 앱
 반도체 공정/계측 데이터 탐색용 분석 워크스페이스 API
 """
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.routes import health, chat, graph, auth, conversations
+
+# 프록시 우회를 강제한다. (LLM 호출 시 시스템 프록시 사용 방지)
+os.environ["no_proxy"] = "*"
+os.environ["NO_PROXY"] = "*"
 
 # 로깅 설정
 logging.basicConfig(
