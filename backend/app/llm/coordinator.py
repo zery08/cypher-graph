@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from openai import OpenAI
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
@@ -17,13 +18,14 @@ from app.schemas.chat import ChatResponse, ChatAction, ToolResult, StepInfo
 
 logger = logging.getLogger(__name__)
 
-AVAILABLE_TOOLS = {
-    "graph_schema_tool": graph_schema_tool,
-    "graph_cypher_qa_tool": graph_cypher_qa_tool,
-    "graph_query_tool": graph_query_tool,
-    "table_summary_tool": table_summary_tool,
-    "chart_recommendation_tool": chart_recommendation_tool,
-}
+AVAILABLE_TOOL_LIST = [
+    graph_schema_tool,
+    graph_cypher_qa_tool,
+    graph_query_tool,
+    table_summary_tool,
+    chart_recommendation_tool,
+]
+AVAILABLE_TOOLS = {tool.name: tool for tool in AVAILABLE_TOOL_LIST}
 
 TOOL_LABELS = {
     "graph_schema_tool": "스키마 조회",
@@ -33,67 +35,7 @@ TOOL_LABELS = {
     "chart_recommendation_tool": "차트 추천",
 }
 
-OPENAI_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "graph_schema_tool",
-            "description": "Neo4j 데이터베이스의 노드/관계 스키마를 조회합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "스키마 조회 힌트(선택)"}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "graph_cypher_qa_tool",
-            "description": "자연어 질문을 Cypher로 변환 후 실행하여 답변을 생성합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {"question": {"type": "string", "description": "분석 질문"}},
-                "required": ["question"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "graph_query_tool",
-            "description": "직접 작성한 읽기 전용 Cypher를 실행합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {"cypher": {"type": "string", "description": "실행할 Cypher"}},
-                "required": ["cypher"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "table_summary_tool",
-            "description": "테이블(JSON)을 요약합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {"data_json": {"type": "string", "description": "JSON 문자열"}},
-                "required": ["data_json"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "chart_recommendation_tool",
-            "description": "데이터 설명을 바탕으로 차트를 추천합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {"data_description": {"type": "string", "description": "데이터 설명"}},
-                "required": ["data_description"],
-            },
-        },
-    },
-]
+OPENAI_TOOLS = [convert_to_openai_tool(tool) for tool in AVAILABLE_TOOL_LIST]
 
 
 def _make_client() -> OpenAI:
