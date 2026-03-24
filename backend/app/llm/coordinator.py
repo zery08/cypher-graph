@@ -86,6 +86,38 @@ def _extract_reasoning_from_message(msg: AIMessage) -> str:
     return ""
 
 
+def _extract_reasoning_content(content: object) -> str:
+    """thinking/reasoning 블록 텍스트를 추출한다."""
+    if isinstance(content, str):
+        return ""
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type not in ("reasoning", "thinking"):
+                continue
+            text = block.get("text")
+            if isinstance(text, str):
+                chunks.append(text)
+                continue
+            # provider별 필드 호환
+            reasoning = block.get("reasoning")
+            if isinstance(reasoning, str):
+                chunks.append(reasoning)
+                continue
+            content_items = block.get("content")
+            if isinstance(content_items, list):
+                for item in content_items:
+                    if isinstance(item, dict):
+                        item_text = item.get("text")
+                        if isinstance(item_text, str):
+                            chunks.append(item_text)
+        return "".join(chunks)
+    return ""
+
+
 def _build_agent():
     """coordinator agent 빌드"""
     llm = get_coordinator_llm()
