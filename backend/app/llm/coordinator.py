@@ -33,6 +33,30 @@ TOOL_LABELS = {
 }
 
 
+def _extract_text_content(content: object) -> str:
+    """LangChain/OpenAI 호환 content 블록에서 사용자에게 보여줄 텍스트만 추출한다."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                chunks.append(block)
+                continue
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type in ("text", "output_text"):
+                text = block.get("text")
+                if isinstance(text, str):
+                    chunks.append(text)
+            elif block_type == "reasoning":
+                # reasoning 블록은 사용자 응답에 노출하지 않음
+                continue
+        return "".join(chunks)
+    return ""
+
+
 def _build_agent():
     """coordinator agent 빌드"""
     llm = get_coordinator_llm()
@@ -117,7 +141,7 @@ async def run_coordinator(
         answer = ""
         for msg in reversed(response_messages):
             if isinstance(msg, AIMessage) and msg.content:
-                answer = msg.content if isinstance(msg.content, str) else str(msg.content)
+                answer = _extract_text_content(msg.content)
                 break
 
         # 중간 단계 수집 (AIMessage tool_calls + ToolMessage 쌍)
@@ -289,7 +313,7 @@ async def stream_coordinator(
             elif kind == "on_chat_model_stream" and tools_running == 0:
                 chunk = event["data"].get("chunk")
                 if chunk:
-                    content = chunk.content if isinstance(chunk.content, str) else ""
+                    content = _extract_text_content(getattr(chunk, "content", ""))
                     tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
                     if content and not tool_call_chunks:
                         yield json.dumps({"type": "token", "content": content}, ensure_ascii=False)

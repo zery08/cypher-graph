@@ -13,21 +13,17 @@ class Settings(BaseSettings):
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")
 
     # LLM 모델 설정
-    coordinator_model: str = Field(
-        default="minimax/minimax-m2.5:free", alias="COORDINATOR_MODEL"
-    )
-    cypher_model: str = Field(
-        default="minimax/minimax-m2.5:free", alias="CYPHER_MODEL"
-    )
-    answer_model: str = Field(
-        default="minimax/minimax-m2.5:free", alias="ANSWER_MODEL"
-    )
+    coordinator_model: str | None = Field(default=None, alias="COORDINATOR_MODEL")
+    cypher_model: str | None = Field(default=None, alias="CYPHER_MODEL")
+    answer_model: str | None = Field(default=None, alias="ANSWER_MODEL")
 
-    # OpenAI 호환 API 설정 (OpenRouter 등)
-    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_base_url: str = Field(
-        default="https://openrouter.ai/api/v1", alias="OPENAI_BASE_URL"
-    )
+    # 역할별 OpenAI 호환 API 설정 (OpenRouter 등)
+    coordinator_api_key: str | None = Field(default=None, alias="COORDINATOR_API_KEY")
+    coordinator_base_url: str | None = Field(default=None, alias="COORDINATOR_BASE_URL")
+    cypher_api_key: str | None = Field(default=None, alias="CYPHER_API_KEY")
+    cypher_base_url: str | None = Field(default=None, alias="CYPHER_BASE_URL")
+    answer_api_key: str | None = Field(default=None, alias="ANSWER_API_KEY")
+    answer_base_url: str | None = Field(default=None, alias="ANSWER_BASE_URL")
 
     # 쿼리 제한 설정
     max_query_results: int = Field(default=100, alias="MAX_QUERY_RESULTS")

@@ -60,12 +60,17 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=wafergraph123
 
-OPENAI_API_KEY=sk-or-v1-여기에_openrouter_키_입력
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-
 COORDINATOR_MODEL=minimax/minimax-m2.5:free
 CYPHER_MODEL=minimax/minimax-m2.5:free
 ANSWER_MODEL=minimax/minimax-m2.5:free
+
+# 역할별 인증/엔드포인트
+COORDINATOR_API_KEY=sk-or-v1-여기에_openrouter_키_입력
+COORDINATOR_BASE_URL=https://openrouter.ai/api/v1
+CYPHER_API_KEY=sk-or-v1-여기에_openrouter_키_입력
+CYPHER_BASE_URL=https://openrouter.ai/api/v1
+ANSWER_API_KEY=sk-or-v1-여기에_openrouter_키_입력
+ANSWER_BASE_URL=https://openrouter.ai/api/v1
 
 MAX_QUERY_RESULTS=100
 EOF
@@ -114,11 +119,15 @@ npm run dev:electron
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j 연결 주소 |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j 사용자명 |
 | `NEO4J_PASSWORD` | `password` | Neo4j 비밀번호 |
-| `OPENAI_API_KEY` | — | OpenRouter API 키 |
-| `OPENAI_BASE_URL` | `https://openrouter.ai/api/v1` | LLM API 엔드포인트 |
-| `COORDINATOR_MODEL` | `minimax/minimax-m2.5:free` | 코디네이터 LLM 모델 |
-| `CYPHER_MODEL` | `minimax/minimax-m2.5:free` | Cypher 생성 LLM 모델 |
-| `ANSWER_MODEL` | `minimax/minimax-m2.5:free` | 답변 정리 LLM 모델 |
+| `COORDINATOR_MODEL` | `None` | 코디네이터 LLM 모델 (필수 설정) |
+| `CYPHER_MODEL` | `None` | Cypher 생성 LLM 모델 (필수 설정) |
+| `ANSWER_MODEL` | `None` | 답변 정리 LLM 모델 (필수 설정) |
+| `COORDINATOR_API_KEY` | `None` | 코디네이터 전용 API 키 |
+| `COORDINATOR_BASE_URL` | `None` | 코디네이터 전용 API 엔드포인트 |
+| `CYPHER_API_KEY` | `None` | Cypher 전용 API 키 |
+| `CYPHER_BASE_URL` | `None` | Cypher 전용 API 엔드포인트 |
+| `ANSWER_API_KEY` | `None` | 답변 정리 전용 API 키 |
+| `ANSWER_BASE_URL` | `None` | 답변 정리 전용 API 엔드포인트 |
 | `MAX_QUERY_RESULTS` | `100` | 쿼리 결과 최대 행 수 |
 | `DATABASE_URL` | — | PostgreSQL URL (대화 기록 저장, 선택) |
 
