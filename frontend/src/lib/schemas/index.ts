@@ -62,6 +62,7 @@ export const StepInfoSchema = z.object({
   tool_key: z.string(),
   input: z.string(),
   output: z.string(),
+  reasoning: z.string().nullable().optional(),
 })
 
 export const ChatResponseSchema = z.object({
@@ -69,7 +70,7 @@ export const ChatResponseSchema = z.object({
   actions: z.array(ChatActionSchema).nullable().optional().default([]),
   tool_results: ToolResultSchema.nullable().optional(),
   steps: z.array(StepInfoSchema).optional().default([]),
-  thinking: z.string().nullable().optional(),
+  reasoning: z.string().nullable().optional(),
 })
 
 // ─── 쿼리 관련 스키마 ─────────────────────────────────────────────────────────

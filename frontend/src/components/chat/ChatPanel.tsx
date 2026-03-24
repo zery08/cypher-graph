@@ -44,6 +44,26 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
 
 // ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
+function ReasoningBlock({ reasoning }: { reasoning: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="text-xs mb-1">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-amber-600/70 hover:text-amber-600 transition-colors"
+      >
+        <ChevronRight className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="font-medium">추론 과정</span>
+      </button>
+      {open && (
+        <div className="mt-1 px-2 py-1.5 bg-amber-50/60 border border-amber-200/50 rounded text-amber-800/80 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
+          {reasoning}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StepsList({ steps }: { steps: StepInfo[] }) {
   const [open, setOpen] = useState(false)
   if (!steps || steps.length === 0) return null
@@ -61,18 +81,21 @@ function StepsList({ steps }: { steps: StepInfo[] }) {
       {open && (
         <div className="flex flex-col gap-2 pl-4 border-l border-border/50">
           {steps.map((step, i) => (
-            <div key={i} className="bg-muted/30 rounded p-2 space-y-1">
-              <div className="font-medium text-muted-foreground flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
-                {step.tool}
-              </div>
-              {step.input && (
-                <div className="text-muted-foreground/60 whitespace-pre-wrap break-words">
-                  입력: {step.input}
+            <div key={i} className="space-y-1">
+              {step.reasoning && <ReasoningBlock reasoning={step.reasoning} />}
+              <div className="bg-muted/30 rounded p-2 space-y-1">
+                <div className="font-medium text-muted-foreground flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                  {step.tool}
                 </div>
-              )}
-              <div className="text-muted-foreground/80 whitespace-pre-wrap break-words">
-                {step.output}
+                {step.input && (
+                  <div className="text-muted-foreground/60 whitespace-pre-wrap break-words">
+                    입력: {step.input}
+                  </div>
+                )}
+                <div className="text-muted-foreground/80 whitespace-pre-wrap break-words">
+                  {step.output}
+                </div>
               </div>
             </div>
           ))}
@@ -87,30 +110,19 @@ function StepsList({ steps }: { steps: StepInfo[] }) {
 interface MessageBubbleProps {
   role: 'user' | 'assistant'
   content: string
-  thinking?: string
   actions?: ChatAction[]
   steps?: StepInfo[]
+  reasoning?: string | null
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, thinking, actions, steps, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, actions, steps, reasoning, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      {!isUser && thinking && (
-        <div className="max-w-[90%] text-xs text-muted-foreground bg-muted/20 border border-border/50 rounded px-3 py-2 whitespace-pre-wrap break-words">
-          <div className="font-medium text-[11px] uppercase tracking-wide mb-1 opacity-70">Thinking</div>
-          {thinking}
-        </div>
-      )}
+      {!isUser && reasoning && <ReasoningBlock reasoning={reasoning} />}
       {!isUser && <StepsList steps={steps ?? []} />}
-      {!isUser && thinking && (
-        <div className="max-w-[90%] rounded-lg px-3 py-2 text-xs leading-relaxed border border-border/50 bg-background/60 text-muted-foreground whitespace-pre-wrap break-words">
-          <div className="font-medium mb-1 text-foreground/80">추론</div>
-          {thinking}
-        </div>
-      )}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser
@@ -155,7 +167,6 @@ export function ChatPanel() {
     addMessage,
     addStreamingMessage,
     appendToken,
-    appendThinking,
     updateMessage,
     setLoading,
     contextSnapshot,
@@ -253,20 +264,29 @@ export function ChatPanel() {
     // 스트리밍 메시지 자리 생성
     const assistantId = addStreamingMessage()
     const liveSteps: StepInfo[] = []
+    let liveReasoning = ''
+    let pendingStepReasoning = ''
 
     try {
       for await (const event of streamChatMessage(text, history, context)) {
-        if (event.type === 'token') {
+        if (event.type === 'reasoning_token') {
+          liveReasoning += event.content
+          updateMessage(assistantId, { reasoning: liveReasoning })
+        } else if (event.type === 'token') {
           appendToken(assistantId, event.content)
-        } else if (event.type === 'thinking_token') {
-          appendThinking(assistantId, event.content)
         } else if (event.type === 'step_start') {
-          // 진행 중인 step을 임시로 표시
-          const step: StepInfo = { tool: event.tool, tool_key: event.tool_key, input: event.input, output: '...' }
+          pendingStepReasoning = liveReasoning
+          liveReasoning = ''  // 다음 step을 위해 초기화
+          const step: StepInfo = {
+            tool: event.tool,
+            tool_key: event.tool_key,
+            input: event.input,
+            output: '...',
+            reasoning: pendingStepReasoning || undefined,
+          }
           liveSteps.push(step)
-          updateMessage(assistantId, { steps: [...liveSteps] })
+          updateMessage(assistantId, { steps: [...liveSteps], reasoning: null })
         } else if (event.type === 'step_end') {
-          // 해당 step의 output 갱신
           let idx = -1
           for (let i = liveSteps.length - 1; i >= 0; i--) {
             if (liveSteps[i].tool_key === event.tool_key && liveSteps[i].output === '...') { idx = i; break }
@@ -281,7 +301,7 @@ export function ChatPanel() {
             actions,
             steps: event.steps,
             toolResults: toolResults ?? undefined,
-            thinking: event.thinking ?? undefined,
+            reasoning: event.reasoning ?? liveReasoning ?? null,
           })
 
           // tool 결과 반영
@@ -380,6 +400,7 @@ export function ChatPanel() {
             <div className="flex flex-col gap-2 mt-4">
               <p className="text-xs text-muted-foreground text-center">질문 예시</p>
               {[
+                '최근 wafer 10개 알려줘',
                 '이 데이터셋에서 어떤 wafer 종류가 있나요?',
                 'wafer와 recipe 관계를 그래프로 보여주세요',
                 '특정 lot의 계측 결과 이상치가 있는지 확인해주세요',
@@ -401,9 +422,9 @@ export function ChatPanel() {
               key={msg.id}
               role={msg.role}
               content={msg.content}
-              thinking={msg.thinking}
               actions={msg.actions}
               steps={msg.steps}
+              reasoning={msg.reasoning}
               onAction={handleAction}
             />
           ))}

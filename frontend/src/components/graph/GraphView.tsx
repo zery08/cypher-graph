@@ -26,15 +26,6 @@ function getColor(labels: string[]) {
   return DEFAULT_COLOR
 }
 
-function getIcon(labels: string[]): string {
-  const icons: Record<string, string> = {
-    Wafer: '⬡', Recipe: '⚙', Lot: '📦', Step: '▶',
-    Chamber: '⬤', Metrology: '◈', Parameter: '◆',
-  }
-  for (const l of labels) if (icons[l]) return icons[l]
-  return '●'
-}
-
 function getNodeLabel(labels: string[], props: Record<string, unknown>): string {
   const pick = (...keys: string[]) => {
     for (const k of keys) { const v = props[k]; if (v != null && v !== '') return String(v) }

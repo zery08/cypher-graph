@@ -45,10 +45,11 @@ class ToolResult(BaseModel):
 
 
 class StepInfo(BaseModel):
-    tool: str        # tool 이름 (human-readable)
-    tool_key: str    # 실제 함수 이름
-    input: str       # LLM이 tool에 전달한 입력
-    output: str      # tool 실행 결과 요약
+    tool: str           # tool 이름 (human-readable)
+    tool_key: str       # 실제 함수 이름
+    input: str          # LLM이 tool에 전달한 입력
+    output: str         # tool 실행 결과 요약
+    reasoning: str | None = None   # tool 호출 직전 LLM reasoning (thinking 모드)
 
 
 class ChatResponse(BaseModel):
@@ -56,4 +57,4 @@ class ChatResponse(BaseModel):
     actions: list[ChatAction] = []
     tool_results: ToolResult = ToolResult()
     steps: list[StepInfo] = []
-    thinking: str | None = None
+    reasoning: str | None = None   # 최종 답변 직전 LLM reasoning 전체

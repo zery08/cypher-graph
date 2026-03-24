@@ -2,11 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { History, Trash2, Loader2 } from 'lucide-react'
 import {
   fetchConversations,
-  fetchConversationMessages,
   deleteConversation,
   type ConversationSummary,
 } from '@/lib/api/client'
-import { useChatStore } from '@/store/useChatStore'
 
 interface Props {
   onLoad: (conversationId: string) => void

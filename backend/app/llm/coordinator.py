@@ -1,153 +1,533 @@
 """
-Coordinator LLM - OpenAI 호환 수동 agent loop 기반 tool 실행 및 스트리밍
+Coordinator - raw OpenAI 클라이언트 기반 agent loop
+native tool calling 을 먼저 시도하고, 모델이 지원하지 않으면
+텍스트 기반 tool calling (JSON 파싱) 으로 자동 fallback 한다.
+GLM 4.7 / LFM thinking 모드 등 reasoning_content 를 별도 필드로 분리한다.
 """
 import json
 import logging
+import re
 from datetime import datetime
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
-from openai import OpenAI
-from langchain_core.utils.function_calling import convert_to_openai_tool
-
+from openai import AsyncOpenAI, NotFoundError, BadRequestError
 from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
-from app.llm.tools.graph_schema_tool import graph_schema_tool
-from app.llm.tools.graph_cypher_tool import graph_cypher_qa_tool, graph_query_tool
-from app.llm.tools.utility_tools import table_summary_tool, chart_recommendation_tool
+from app.llm.tools import load_all_tools, ToolDef
 from app.schemas.chat import ChatResponse, ChatAction, ToolResult, StepInfo
 
 logger = logging.getLogger(__name__)
 
-AVAILABLE_TOOL_LIST = [
-    graph_schema_tool,
-    graph_cypher_qa_tool,
-    graph_query_tool,
-    table_summary_tool,
-    chart_recommendation_tool,
-]
-AVAILABLE_TOOLS = {tool.name: tool for tool in AVAILABLE_TOOL_LIST}
-
-TOOL_LABELS = {
-    "graph_schema_tool": "스키마 조회",
-    "graph_cypher_qa_tool": "Cypher 생성 및 실행",
-    "graph_query_tool": "Cypher 직접 실행",
-    "table_summary_tool": "데이터 요약",
-    "chart_recommendation_tool": "차트 추천",
-}
-
-OPENAI_TOOLS = [convert_to_openai_tool(tool) for tool in AVAILABLE_TOOL_LIST]
+MAX_TOOL_ROUNDS = 6
 
 
-def _make_client() -> OpenAI:
-    return OpenAI(
-        api_key=settings.coordinator_api_key or "dummy",
-        base_url=settings.coordinator_base_url or None,
+# ── 클라이언트 / 프롬프트 ──────────────────────────────────────────────────────
+
+def _make_client() -> AsyncOpenAI:
+    return AsyncOpenAI(
+        api_key=settings.coordinator_api_key,
+        base_url=settings.coordinator_base_url,
     )
 
 
-def _build_messages(history: list[dict], context: dict, message: str) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": COORDINATOR_SYSTEM_PROMPT.format(current_date=datetime.now().strftime("%Y-%m-%d")),
+def _thinking_extra_body() -> dict:
+    """
+    OpenRouter reasoning / thinking 파라미터를 구성한다.
+    - COORDINATOR_REASONING_EFFORT=high  → {"reasoning": {"effort": "high"}}
+    - COORDINATOR_THINKING_BUDGET=8000   → {"thinking": {"type": "enabled", "budget_tokens": 8000}}
+    둘 다 비어있으면 빈 dict 반환 (기본 동작).
+    """
+    extra: dict = {}
+    if settings.coordinator_reasoning_effort:
+        extra["reasoning"] = {"effort": settings.coordinator_reasoning_effort}
+    if settings.coordinator_thinking_budget > 0:
+        extra["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": settings.coordinator_thinking_budget,
         }
-    ]
-    for msg in history[-6:]:
-        messages.append({"role": msg["role"], "content": msg["content"]})
+    return extra
 
-    context_prefix = ""
+
+def _schema_snippet() -> str:
+    try:
+        from app.services.neo4j_service import get_schema_info
+        schema = get_schema_info()
+        lines = ["## Neo4j 스키마"]
+        for label in schema.get("node_labels", []):
+            props = schema.get("properties", {}).get(label, [])
+            lines.append(f"- 노드 {label}: {', '.join(props)}")
+        for rel in schema.get("relationship_types", []):
+            lines.append(f"- 관계 {rel}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"스키마 주입 실패: {e}")
+        return ""
+
+
+def _system_prompt(tool_defs: list[ToolDef], *, text_mode: bool = False) -> str:
+    base = COORDINATOR_SYSTEM_PROMPT.format(
+        current_date=datetime.now().strftime("%Y-%m-%d"),
+        schema=_schema_snippet(),
+    )
+    if not text_mode:
+        return base
+
+    # text_mode: tool spec 을 프롬프트에 직접 포함하고 JSON 출력 규칙을 안내한다
+    tool_desc_lines = ["## 사용 가능한 Tool (JSON 형식으로 호출)"]
+    for t in tool_defs:
+        fn = t.spec["function"]
+        params = fn.get("parameters", {}).get("properties", {})
+        param_str = ", ".join(
+            f'{k}: {v.get("type","string")} — {v.get("description","")}'
+            for k, v in params.items()
+        )
+        tool_desc_lines.append(f'- **{t.name}**: {fn["description"]}')
+        if param_str:
+            tool_desc_lines.append(f'  인자: {param_str}')
+
+    tool_block = "\n".join(tool_desc_lines)
+
+    rule_block = """
+## Tool 호출 규칙
+Tool 을 호출할 때는 반드시 아래 형식의 JSON 블록만 출력하고 다른 텍스트는 붙이지 않는다.
+```tool_call
+{"name": "<tool_name>", "arguments": {<인자 JSON>}}
+```
+Tool 결과를 받은 뒤 최종 답변을 한글로 작성한다.
+Tool 이 필요 없을 경우 바로 한글로 답변한다.
+"""
+    return f"{base}\n\n{tool_block}\n{rule_block}"
+
+
+def _build_messages(history: list[dict], context: dict, message: str) -> list[dict]:
+    msgs: list[dict] = []
+    for m in history[-6:]:
+        msgs.append({"role": m["role"], "content": m["content"]})
+    prefix = ""
     if context.get("current_query"):
-        context_prefix += f"[현재 실행 쿼리: {context['current_query']}]\n"
+        prefix += f"[현재 실행 쿼리: {context['current_query']}]\n"
     if context.get("selected_node"):
-        context_prefix += f"[선택된 노드: {context['selected_node']}]\n"
-
-    user_text = f"{context_prefix}{message}" if context_prefix else message
-    messages.append({"role": "user", "content": user_text})
-    return messages
+        prefix += f"[선택된 노드: {context['selected_node']}]\n"
+    msgs.append({"role": "user", "content": f"{prefix}{message}" if prefix else message})
+    return msgs
 
 
-def _parse_tool_calls_from_stream(stream: Any) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
-    reasoning = ""
-    content = ""
-    assembled: dict[int, dict[str, Any]] = {}
-    events: list[dict[str, Any]] = []
-    for chunk in stream:
-        delta = chunk.choices[0].delta
-        thinking_piece = getattr(delta, "reasoning_content", None)
-        if thinking_piece:
-            reasoning += thinking_piece
-            events.append({"type": "thinking_token", "content": thinking_piece})
-        token_piece = getattr(delta, "content", None)
-        if token_piece:
-            content += token_piece
-            events.append({"type": "token", "content": token_piece})
-        for tc in getattr(delta, "tool_calls", None) or []:
-            idx = tc.index or 0
-            entry = assembled.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-            if tc.id:
-                entry["id"] = tc.id
-            if tc.function:
-                if tc.function.name:
-                    entry["function"]["name"] += tc.function.name
-                if tc.function.arguments:
-                    entry["function"]["arguments"] += tc.function.arguments
+# ── reasoning 추출 ─────────────────────────────────────────────────────────────
 
-    tool_calls = [assembled[k] for k in sorted(assembled.keys())]
-    return reasoning, content, tool_calls, events
+def _extract_reasoning(message) -> str:
+    extra = getattr(message, "model_extra", {}) or {}
+    rc = extra.get("reasoning_content") or extra.get("thinking") or ""
+    if rc:
+        return rc
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        parts = [b.get("thinking", "") for b in content
+                 if isinstance(b, dict) and b.get("type") == "thinking"]
+        return "\n".join(parts)
+    return ""
 
 
-def _run_tool_call(tc: dict[str, Any]) -> tuple[str, ToolResult | None, list[ChatAction], str]:
-    name = tc["function"]["name"]
-    args_str = tc["function"].get("arguments") or "{}"
-    try:
-        args = json.loads(args_str)
-    except json.JSONDecodeError:
-        args = {}
-
-    tool = AVAILABLE_TOOLS.get(name)
-    if tool is None:
-        result = json.dumps({"error": f"unknown tool: {name}"}, ensure_ascii=False)
-        return result, None, [], result
-
-    output = tool.invoke(args)
-    output_str = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
-    tool_result, actions, summary = _extract_tool_result(name, output_str)
-    return output_str, tool_result, actions, summary
+def _extract_reasoning_from_delta(delta) -> str:
+    extra = getattr(delta, "model_extra", {}) or {}
+    return extra.get("reasoning") or extra.get("reasoning_content") or extra.get("thinking") or ""
 
 
-def _extract_tool_result(tool_name: str, output_str: str) -> tuple[ToolResult | None, list[ChatAction], str]:
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _split_think_content(text: str) -> tuple[str, str]:
+    """
+    <think>...</think> 태그를 content에서 분리한다.
+    QwQ, DeepSeek-R1 계열은 reasoning을 별도 필드 대신 이 태그로 감싼다.
+    returns: (reasoning, clean_content)
+    """
+    reasoning_parts = _THINK_TAG_RE.findall(text)
+    clean = _THINK_TAG_RE.sub("", text).strip()
+    return "\n".join(reasoning_parts).strip(), clean
+
+
+# ── tool 결과 파싱 ─────────────────────────────────────────────────────────────
+
+def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, list[ChatAction], str]:
     actions: list[ChatAction] = []
-    summary = output_str[:2000]
+    summary = output[:2000]
     try:
-        data = json.loads(output_str)
+        data = json.loads(output)
         if "error" in data:
             return None, [], f"오류: {data['error']}"
-
-        result = ToolResult()
         if tool_name in ("graph_cypher_qa_tool", "graph_query_tool"):
-            result.cypher = data.get("cypher", "")
-            result.graph = {
-                "nodes": data.get("nodes", []),
-                "edges": data.get("edges", []),
-                "raw": data.get("result", data.get("raw", [])),
-            }
-            result.table = data.get("result", data.get("raw", []))
-            result.summary = data.get("answer", "")
+            result = ToolResult(
+                cypher=data.get("cypher", ""),
+                graph={
+                    "nodes": data.get("nodes", []),
+                    "edges": data.get("edges", []),
+                    "raw": data.get("result", data.get("raw", [])),
+                },
+                table=data.get("result", data.get("raw", [])),
+                summary=data.get("answer", ""),
+            )
             row_count = data.get("row_count", "?")
             cypher = data.get("cypher", "")
             summary = f"{row_count}건 반환"
             if cypher:
                 summary += f"\n```cypher\n{cypher}\n```"
-            if data.get("cypher"):
-                actions.append(ChatAction(type="apply_query", query=data["cypher"]))
+                actions.append(ChatAction(type="apply_query", query=cypher))
+            # 노드가 하나라도 있으면 그래프 탭, 없으면 테이블 탭
             if data.get("nodes"):
                 actions.append(ChatAction(type="open_tab", tab="graph"))
-            elif data.get("result"):
+            else:
                 actions.append(ChatAction(type="open_tab", tab="table"))
-        return result, actions, summary
+            return result, actions, summary
+    except Exception:
+        pass
+    return None, [], summary
+
+
+# ── 텍스트 기반 tool call 파싱 ─────────────────────────────────────────────────
+
+_TOOL_CALL_RE = re.compile(
+    r"```tool_call\s*\n(.*?)\n```",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _parse_text_tool_call(text: str) -> dict | None:
+    """LLM 텍스트 응답에서 ```tool_call ... ``` 블록을 추출하여 파싱한다."""
+    m = _TOOL_CALL_RE.search(text)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1).strip())
+    except Exception:
+        return None
+
+
+def _strip_tool_call_block(text: str) -> str:
+    return _TOOL_CALL_RE.sub("", text).strip()
+
+
+# ── 공통 tool 실행 ─────────────────────────────────────────────────────────────
+
+def _run_tool(tool_def: ToolDef | None, fn_name: str, fn_args_str: str) -> str:
+    if tool_def is None:
+        return json.dumps({"error": f"알 수 없는 tool: {fn_name}"})
+    try:
+        args = json.loads(fn_args_str) if isinstance(fn_args_str, str) else fn_args_str
+        return tool_def.run(args)
     except Exception as e:
-        logger.warning(f"_extract_tool_result 파싱 실패 ({tool_name}): {e} | 입력 앞부분: {output_str[:100]}")
-        return None, [], summary
+        logger.error(f"tool 실행 오류 ({fn_name}): {e}")
+        return json.dumps({"error": str(e)})
+
+
+# ── Native tool calling ────────────────────────────────────────────────────────
+
+async def _stream_native(
+    client: AsyncOpenAI,
+    tools_by_name: dict[str, ToolDef],
+    tool_specs: list[dict],
+    messages: list[dict],
+) -> AsyncGenerator[str, None]:
+    """native tool calling 스트림. NotFoundError / BadRequestError 시 StopAsyncIteration."""
+    steps: list[StepInfo] = []
+    all_actions: list[ChatAction] = []
+    final_tool_result = ToolResult()
+    accumulated_reasoning = ""
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        stream = await client.chat.completions.create(
+            model=settings.coordinator_model,
+            messages=messages,
+            tools=tool_specs,
+            tool_choice="auto",
+            stream=True,
+            max_tokens=settings.coordinator_max_tokens,
+            extra_body=_thinking_extra_body() or None,
+        )
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls_acc: dict[int, dict] = {}
+
+        def _fmt_messages(msgs: list[dict]) -> str:
+            lines = []
+            for m in msgs:
+                role = m.get("role", "").upper()
+                content = str(m.get("content") or "")
+                reasoning = (m.get("model_extra") or {}).get("reasoning", "")
+                if reasoning:
+                    lines.append(f"  [REASONING] {reasoning[:500]}")
+                lines.append(f"  [{role}] {content[:500]}")
+            return "\n".join(lines)
+
+        logger.info(f"[LLM 요청] model={settings.coordinator_model}\n{_fmt_messages(messages)}")
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            # delta.model_extra["reasoning"] 추출 (qwen/qwq, gemini thinking 등)
+            delta_extra = getattr(delta, "model_extra", {}) or {}
+            rc = (
+                delta_extra.get("reasoning")
+                or delta_extra.get("reasoning_content")
+                or delta_extra.get("thinking")
+                or ""
+            )
+            if rc:
+                reasoning_parts.append(rc)
+                accumulated_reasoning += rc
+                yield json.dumps({"type": "reasoning_token", "content": rc}, ensure_ascii=False)
+
+            if delta.content:
+                content_parts.append(delta.content)
+                if not tool_calls_acc:
+                    yield json.dumps({"type": "token", "content": delta.content}, ensure_ascii=False)
+
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {"id": "", "type": "function",
+                                               "function": {"name": "", "arguments": ""}}
+                    if tc.id:
+                        tool_calls_acc[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_acc[idx]["function"]["name"] += tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_acc[idx]["function"]["arguments"] += tc.function.arguments
+
+        full_content = "".join(content_parts)
+
+        # reasoning_content 필드 방식 (GLM 등) + <think> 태그 방식 (QwQ, DeepSeek-R1) 동시 지원
+        tag_reasoning, clean_content = _split_think_content(full_content)
+        full_reasoning = ("".join(reasoning_parts) + "\n" + tag_reasoning).strip()
+        if tag_reasoning:
+            full_content = clean_content
+            accumulated_reasoning = ("".join(
+                [accumulated_reasoning] + [tag_reasoning]
+            )).strip()
+
+        step_reasoning = full_reasoning or None
+
+        tool_names = [tc["function"]["name"] for tc in tool_calls_acc.values()]
+        log_lines = [
+            f"[LLM 응답] reasoning={len(full_reasoning)}자 | content={len(full_content)}자 | tool_calls={tool_names}",
+        ]
+        if full_reasoning:
+            log_lines.append(f"  [REASONING]\n{full_reasoning}")
+        if full_content:
+            log_lines.append(f"  [ASSISTANT]\n{full_content}")
+        for tc in tool_calls_acc.values():
+            log_lines.append(f"  [TOOL_CALL] {tc['function']['name']}({tc['function']['arguments'][:300]})")
+        logger.info("\n".join(log_lines))
+
+        # <think> 태그에서 분리한 reasoning을 reasoning_token 이벤트로 전송
+        if tag_reasoning:
+            yield json.dumps({"type": "reasoning_token", "content": tag_reasoning}, ensure_ascii=False)
+
+        if not tool_calls_acc:
+            yield json.dumps({
+                "type": "done",
+                "actions": [a.model_dump() for a in all_actions],
+                "tool_results": final_tool_result.model_dump(),
+                "steps": [s.model_dump() for s in steps],
+                "reasoning": accumulated_reasoning.strip() or None,
+            }, ensure_ascii=False)
+            return
+
+        tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+        messages.append({"role": "assistant", "content": full_content or None,
+                         "tool_calls": tool_calls_list})
+
+        for tc in tool_calls_list:
+            fn_name = tc["function"]["name"]
+            fn_args_str = tc["function"]["arguments"]
+            tool_def = tools_by_name.get(fn_name)
+
+            yield json.dumps({
+                "type": "step_start",
+                "tool": tool_def.label if tool_def else fn_name,
+                "tool_key": fn_name,
+                "input": fn_args_str[:2000],
+                "reasoning": step_reasoning,
+            }, ensure_ascii=False)
+
+            output = _run_tool(tool_def, fn_name, fn_args_str)
+            tool_result, actions, summary = _parse_tool_result(fn_name, output)
+            if tool_result:
+                final_tool_result = tool_result
+                all_actions.extend(actions)
+
+            steps.append(StepInfo(
+                tool=tool_def.label if tool_def else fn_name,
+                tool_key=fn_name,
+                input=fn_args_str[:2000],
+                output=summary,
+                reasoning=step_reasoning,
+            ))
+
+            yield json.dumps({"type": "step_end", "tool_key": fn_name,
+                              "output": summary}, ensure_ascii=False)
+
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
+
+    yield json.dumps({"type": "error", "content": "최대 tool 호출 횟수를 초과했습니다."}, ensure_ascii=False)
+
+
+# ── 텍스트 기반 tool calling (fallback) ───────────────────────────────────────
+
+async def _stream_text(
+    client: AsyncOpenAI,
+    tools_by_name: dict[str, ToolDef],
+    tool_defs: list[ToolDef],
+    messages: list[dict],
+) -> AsyncGenerator[str, None]:
+    """
+    tool use 미지원 모델 fallback.
+    시스템 프롬프트에 tool spec 을 넣고 LLM 이 ```tool_call``` 블록으로 호출하도록 한다.
+    """
+    steps: list[StepInfo] = []
+    all_actions: list[ChatAction] = []
+    final_tool_result = ToolResult()
+    accumulated_reasoning = ""
+
+    # 시스템 메시지를 text_mode 버전으로 교체
+    messages[0] = {"role": "system",
+                   "content": _system_prompt(tool_defs, text_mode=True)}
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        stream = await client.chat.completions.create(
+            model=settings.coordinator_model,
+            messages=messages,
+            stream=True,
+            max_tokens=settings.coordinator_max_tokens,
+            extra_body=_thinking_extra_body() or None,
+        )
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
+
+            rc = _extract_reasoning_from_delta(delta)
+            if rc:
+                reasoning_parts.append(rc)
+                accumulated_reasoning += rc
+                yield json.dumps({"type": "reasoning_token", "content": rc}, ensure_ascii=False)
+
+            if delta.content:
+                content_parts.append(delta.content)
+
+        full_content = "".join(content_parts)
+        step_reasoning = "".join(reasoning_parts) or None
+
+        tc_data = _parse_text_tool_call(full_content)
+
+        if tc_data is None:
+            # tool call 없음 → 최종 답변
+            answer = _strip_tool_call_block(full_content)
+            for char in answer:
+                yield json.dumps({"type": "token", "content": char}, ensure_ascii=False)
+            yield json.dumps({
+                "type": "done",
+                "actions": [a.model_dump() for a in all_actions],
+                "tool_results": final_tool_result.model_dump(),
+                "steps": [s.model_dump() for s in steps],
+                "reasoning": accumulated_reasoning.strip() or None,
+            }, ensure_ascii=False)
+            return
+
+        fn_name = tc_data.get("name", "")
+        fn_args = tc_data.get("arguments", {})
+        fn_args_str = json.dumps(fn_args, ensure_ascii=False)
+        tool_def = tools_by_name.get(fn_name)
+
+        yield json.dumps({
+            "type": "step_start",
+            "tool": tool_def.label if tool_def else fn_name,
+            "tool_key": fn_name,
+            "input": fn_args_str[:2000],
+            "reasoning": step_reasoning,
+        }, ensure_ascii=False)
+
+        output = _run_tool(tool_def, fn_name, fn_args)
+        tool_result, actions, summary = _parse_tool_result(fn_name, output)
+        if tool_result:
+            final_tool_result = tool_result
+            all_actions.extend(actions)
+
+        steps.append(StepInfo(
+            tool=tool_def.label if tool_def else fn_name,
+            tool_key=fn_name,
+            input=fn_args_str[:2000],
+            output=summary,
+            reasoning=step_reasoning,
+        ))
+
+        yield json.dumps({"type": "step_end", "tool_key": fn_name,
+                          "output": summary}, ensure_ascii=False)
+
+        # 대화 히스토리에 tool call + result 추가
+        messages.append({"role": "assistant", "content": full_content})
+        messages.append({
+            "role": "user",
+            "content": f"[tool_result: {fn_name}]\n{output}\n\n위 결과를 바탕으로 한글로 답변해주세요.",
+        })
+
+    yield json.dumps({"type": "error", "content": "최대 tool 호출 횟수를 초과했습니다."}, ensure_ascii=False)
+
+
+# ── 공개 API ──────────────────────────────────────────────────────────────────
+
+async def stream_coordinator(
+    message: str,
+    history: list[dict] = [],
+    context: dict = {},
+) -> AsyncGenerator[str, None]:
+    """
+    coordinator 스트리밍 실행.
+    native tool calling → 실패 시 text-based fallback 자동 전환.
+    """
+    client = _make_client()
+    tool_defs = load_all_tools()
+    tools_by_name = {t.name: t for t in tool_defs}
+    tool_specs = [t.spec for t in tool_defs]
+
+    messages: list[dict] = [
+        {"role": "system", "content": _system_prompt(tool_defs, text_mode=False)}
+    ]
+    messages.extend(_build_messages(history, context, message))
+
+    try:
+        # native tool calling 시도
+        async for event in _stream_native(client, tools_by_name, tool_specs, messages):
+            yield event
+
+    except (NotFoundError, BadRequestError) as e:
+        err_msg = str(e)
+        if "tool" in err_msg.lower() or "404" in err_msg:
+            logger.warning(f"native tool calling 미지원, text fallback 전환: {e}")
+            yield json.dumps({"type": "fallback", "content": "text-based tool calling 모드로 전환합니다."}, ensure_ascii=False)
+            # messages 재구성 (system 은 _stream_text 내부에서 교체됨)
+            messages_fallback: list[dict] = [
+                {"role": "system", "content": ""}  # placeholder
+            ]
+            messages_fallback.extend(_build_messages(history, context, message))
+            async for event in _stream_text(client, tools_by_name, tool_defs, messages_fallback):
+                yield event
+        else:
+            logger.error(f"stream_coordinator 오류: {e}", exc_info=True)
+            yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+
+    except Exception as e:
+        logger.error(f"stream_coordinator 오류: {e}", exc_info=True)
+        yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
 
 
 async def run_coordinator(
@@ -155,127 +535,37 @@ async def run_coordinator(
     history: list[dict] = [],
     context: dict = {},
 ) -> ChatResponse:
-    try:
-        client = _make_client()
-        messages = _build_messages(history, context, message)
-        steps: list[StepInfo] = []
-        all_actions: list[ChatAction] = []
-        final_tool_result = ToolResult()
-        final_answer = ""
-        thinking_parts: list[str] = []
-
-        for _ in range(8):
-            resp = client.chat.completions.create(
-                model=settings.coordinator_model,
-                messages=messages,
-                tools=OPENAI_TOOLS,
-                extra_body={"thinking": {"type": "enabled", "clear_thinking": False}},
-            )
-            msg = resp.choices[0].message
-            answer_piece = msg.content or ""
-            reasoning_piece = getattr(msg, "reasoning_content", None) or ""
-            tool_calls = [tc.model_dump() for tc in (msg.tool_calls or [])]
-            final_answer = answer_piece or final_answer
-            if reasoning_piece:
-                thinking_parts.append(reasoning_piece)
-
-            if not tool_calls:
-                break
-
-            messages.append({
-                "role": "assistant",
-                "content": answer_piece,
-                "reasoning_content": reasoning_piece,
-                "tool_calls": tool_calls,
-            })
-
-            for tc in tool_calls:
-                output_str, tool_result, actions, summary = _run_tool_call(tc)
-                tool_name = tc["function"]["name"]
-                input_preview = (tc["function"].get("arguments") or "")[:2000]
-                steps.append(StepInfo(tool=TOOL_LABELS.get(tool_name, tool_name), tool_key=tool_name, input=input_preview, output=summary))
-                if tool_result:
-                    final_tool_result = tool_result
-                    all_actions.extend(actions)
-                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output_str})
-
-        return ChatResponse(
-            message=final_answer or "처리가 완료되었습니다.",
-            actions=all_actions,
-            tool_results=final_tool_result,
-            steps=steps,
-            thinking="".join(thinking_parts) or None,
-        )
-
-    except Exception as e:
-        logger.error(f"coordinator 실행 실패: {e}", exc_info=True)
-        return ChatResponse(message=f"처리 중 오류가 발생했습니다: {str(e)}", actions=[], tool_results=ToolResult())
-
-
-async def stream_coordinator(
-    message: str,
-    history: list[dict] = [],
-    context: dict = {},
-) -> AsyncGenerator[str, None]:
-    client = _make_client()
-    messages = _build_messages(history, context, message)
+    """비스트리밍 실행 (stream_coordinator 를 내부에서 소비)."""
+    tokens: list[str] = []
     steps: list[StepInfo] = []
     all_actions: list[ChatAction] = []
     final_tool_result = ToolResult()
-    collected_thinking: list[str] = []
+    reasoning_parts: list[str] = []
 
     try:
-        for _ in range(8):
-            stream = client.chat.completions.create(
-                model=settings.coordinator_model,
-                messages=messages,
-                tools=OPENAI_TOOLS,
-                stream=True,
-                extra_body={"thinking": {"type": "enabled", "clear_thinking": False}},
-            )
-            reasoning, content, tool_calls, events = _parse_tool_calls_from_stream(stream)
-            for event in events:
-                if event["type"] == "thinking_token":
-                    collected_thinking.append(event["content"])
-                yield json.dumps(event, ensure_ascii=False)
-
-            if not tool_calls:
+        async for raw in stream_coordinator(message, history, context):
+            event = json.loads(raw)
+            t = event.get("type")
+            if t == "token":
+                tokens.append(event.get("content", ""))
+            elif t == "reasoning_token":
+                reasoning_parts.append(event.get("content", ""))
+            elif t == "done":
+                all_actions = [ChatAction(**a) for a in event.get("actions", [])]
+                tr = event.get("tool_results", {})
+                final_tool_result = ToolResult(**tr) if tr else ToolResult()
+                steps = [StepInfo(**s) for s in event.get("steps", [])]
                 break
-
-            messages.append({
-                "role": "assistant",
-                "content": content,
-                "reasoning_content": reasoning,
-                "tool_calls": tool_calls,
-            })
-
-            for tc in tool_calls:
-                tool_name = tc["function"]["name"]
-                input_preview = (tc["function"].get("arguments") or "")[:2000]
-                yield json.dumps({
-                    "type": "step_start",
-                    "tool": TOOL_LABELS.get(tool_name, tool_name),
-                    "tool_key": tool_name,
-                    "input": input_preview,
-                }, ensure_ascii=False)
-
-                output_str, tool_result, actions, summary = _run_tool_call(tc)
-                steps.append(StepInfo(tool=TOOL_LABELS.get(tool_name, tool_name), tool_key=tool_name, input=input_preview, output=summary))
-                if tool_result:
-                    final_tool_result = tool_result
-                    all_actions.extend(actions)
-
-                yield json.dumps({"type": "step_end", "tool_key": tool_name, "output": summary}, ensure_ascii=False)
-                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output_str})
-
-        yield json.dumps({
-            "type": "done",
-            "actions": [a.model_dump() for a in all_actions],
-            "tool_results": final_tool_result.model_dump(),
-            "steps": [s.model_dump() for s in steps],
-            "thinking": "".join(collected_thinking) or None,
-        }, ensure_ascii=False)
-
+            elif t == "error":
+                return ChatResponse(message=f"오류: {event.get('content', '')}")
     except Exception as e:
-        logger.error(f"stream_coordinator 오류: {e}", exc_info=True)
-        yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+        logger.error(f"run_coordinator 실패: {e}", exc_info=True)
+        return ChatResponse(message=f"처리 중 오류가 발생했습니다: {str(e)}")
+
+    return ChatResponse(
+        message="".join(tokens) or "처리가 완료되었습니다.",
+        actions=all_actions,
+        tool_results=final_tool_result,
+        steps=steps,
+        reasoning="".join(reasoning_parts).strip() or None,
+    )
