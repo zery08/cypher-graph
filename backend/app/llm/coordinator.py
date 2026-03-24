@@ -1,13 +1,14 @@
 """
-Coordinator LLM - tool 선택 및 최종 답변 생성 (LangChain 1.x create_agent 기반)
+Coordinator LLM - OpenAI 호환 수동 agent loop 기반 tool 실행 및 스트리밍
 """
 import json
 import logging
 from datetime import datetime
-from typing import AsyncGenerator
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from app.llm.models import get_coordinator_llm
+from typing import Any, AsyncGenerator
+
+from openai import OpenAI
+
+from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
 from app.llm.tools.graph_schema_tool import graph_schema_tool
 from app.llm.tools.graph_cypher_tool import graph_cypher_qa_tool, graph_query_tool
@@ -16,127 +17,101 @@ from app.schemas.chat import ChatResponse, ChatAction, ToolResult, StepInfo
 
 logger = logging.getLogger(__name__)
 
-AVAILABLE_TOOLS = [
-    graph_schema_tool,
-    graph_cypher_qa_tool,
-    graph_query_tool,
-    table_summary_tool,
-    chart_recommendation_tool,
-]
+AVAILABLE_TOOLS = {
+    "graph_schema_tool": graph_schema_tool,
+    "graph_cypher_qa_tool": graph_cypher_qa_tool,
+    "graph_query_tool": graph_query_tool,
+    "table_summary_tool": table_summary_tool,
+    "chart_recommendation_tool": chart_recommendation_tool,
+}
 
 TOOL_LABELS = {
-    "graph_schema_tool":         "스키마 조회",
-    "graph_cypher_qa_tool":      "Cypher 생성 및 실행",
-    "graph_query_tool":          "Cypher 직접 실행",
-    "table_summary_tool":        "데이터 요약",
+    "graph_schema_tool": "스키마 조회",
+    "graph_cypher_qa_tool": "Cypher 생성 및 실행",
+    "graph_query_tool": "Cypher 직접 실행",
+    "table_summary_tool": "데이터 요약",
     "chart_recommendation_tool": "차트 추천",
 }
 
-
-def _extract_content_parts(content: object) -> tuple[str, str]:
-    """LangChain/OpenAI 호환 content 블록에서 (answer, thinking)을 추출한다."""
-    if isinstance(content, str):
-        return content, ""
-    if isinstance(content, list):
-        answer_chunks: list[str] = []
-        thinking_chunks: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                answer_chunks.append(block)
-                continue
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type in ("text", "output_text"):
-                text = block.get("text")
-                if isinstance(text, str):
-                    answer_chunks.append(text)
-            elif block_type in ("reasoning", "reasoning_content"):
-                # thinking 모델의 추론 블록
-                text = block.get("text")
-                if isinstance(text, str):
-                    thinking_chunks.append(text)
-
-                summary = block.get("summary")
-                if isinstance(summary, list):
-                    for s in summary:
-                        if isinstance(s, dict):
-                            sum_text = s.get("text")
-                            if isinstance(sum_text, str):
-                                thinking_chunks.append(sum_text)
-        return "".join(answer_chunks), "".join(thinking_chunks)
-    return "", ""
-
-
-def _extract_reasoning_from_message(msg: AIMessage) -> str:
-    """AIMessage의 provider별 additional kwargs에서 reasoning 텍스트를 추출한다."""
-    additional = getattr(msg, "additional_kwargs", {}) or {}
-    candidates = [
-        additional.get("reasoning_content"),
-        additional.get("reasoning"),
-        additional.get("thinking"),
-    ]
-    for item in candidates:
-        if isinstance(item, str) and item.strip():
-            return item
-        if isinstance(item, list):
-            texts = [x for x in item if isinstance(x, str)]
-            if texts:
-                return "".join(texts)
-    return ""
-
-
-def _extract_reasoning_content(content: object) -> str:
-    """thinking/reasoning 블록 텍스트를 추출한다."""
-    if isinstance(content, str):
-        return ""
-    if isinstance(content, list):
-        chunks: list[str] = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type not in ("reasoning", "thinking"):
-                continue
-            text = block.get("text")
-            if isinstance(text, str):
-                chunks.append(text)
-                continue
-            # provider별 필드 호환
-            reasoning = block.get("reasoning")
-            if isinstance(reasoning, str):
-                chunks.append(reasoning)
-                continue
-            content_items = block.get("content")
-            if isinstance(content_items, list):
-                for item in content_items:
-                    if isinstance(item, dict):
-                        item_text = item.get("text")
-                        if isinstance(item_text, str):
-                            chunks.append(item_text)
-        return "".join(chunks)
-    return ""
+OPENAI_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_schema_tool",
+            "description": "Neo4j 데이터베이스의 노드/관계 스키마를 조회합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "스키마 조회 힌트(선택)"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_cypher_qa_tool",
+            "description": "자연어 질문을 Cypher로 변환 후 실행하여 답변을 생성합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"question": {"type": "string", "description": "분석 질문"}},
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_query_tool",
+            "description": "직접 작성한 읽기 전용 Cypher를 실행합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"cypher": {"type": "string", "description": "실행할 Cypher"}},
+                "required": ["cypher"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "table_summary_tool",
+            "description": "테이블(JSON)을 요약합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"data_json": {"type": "string", "description": "JSON 문자열"}},
+                "required": ["data_json"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "chart_recommendation_tool",
+            "description": "데이터 설명을 바탕으로 차트를 추천합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"data_description": {"type": "string", "description": "데이터 설명"}},
+                "required": ["data_description"],
+            },
+        },
+    },
+]
 
 
-def _build_agent():
-    """coordinator agent 빌드"""
-    llm = get_coordinator_llm()
-    return create_agent(
-        model=llm,
-        tools=AVAILABLE_TOOLS,
-        system_prompt=COORDINATOR_SYSTEM_PROMPT.format(
-            current_date=datetime.now().strftime("%Y-%m-%d")
-        ),
+def _make_client() -> OpenAI:
+    return OpenAI(
+        api_key=settings.coordinator_api_key or "dummy",
+        base_url=settings.coordinator_base_url or None,
     )
 
 
-def _build_messages(history: list[dict], context: dict, message: str):
-    messages = []
+def _build_messages(history: list[dict], context: dict, message: str) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": COORDINATOR_SYSTEM_PROMPT.format(current_date=datetime.now().strftime("%Y-%m-%d")),
+        }
+    ]
     for msg in history[-6:]:
-        if msg["role"] == "user":
-            messages.append(HumanMessage(content=msg["content"]))
-        else:
-            messages.append(AIMessage(content=msg["content"]))
+        messages.append({"role": msg["role"], "content": msg["content"]})
 
     context_prefix = ""
     if context.get("current_query"):
@@ -144,12 +119,61 @@ def _build_messages(history: list[dict], context: dict, message: str):
     if context.get("selected_node"):
         context_prefix += f"[선택된 노드: {context['selected_node']}]\n"
 
-    messages.append(HumanMessage(content=f"{context_prefix}{message}" if context_prefix else message))
+    user_text = f"{context_prefix}{message}" if context_prefix else message
+    messages.append({"role": "user", "content": user_text})
     return messages
 
 
+def _parse_tool_calls_from_stream(stream: Any) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
+    reasoning = ""
+    content = ""
+    assembled: dict[int, dict[str, Any]] = {}
+    events: list[dict[str, Any]] = []
+    for chunk in stream:
+        delta = chunk.choices[0].delta
+        thinking_piece = getattr(delta, "reasoning_content", None)
+        if thinking_piece:
+            reasoning += thinking_piece
+            events.append({"type": "thinking_token", "content": thinking_piece})
+        token_piece = getattr(delta, "content", None)
+        if token_piece:
+            content += token_piece
+            events.append({"type": "token", "content": token_piece})
+        for tc in getattr(delta, "tool_calls", None) or []:
+            idx = tc.index or 0
+            entry = assembled.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+            if tc.id:
+                entry["id"] = tc.id
+            if tc.function:
+                if tc.function.name:
+                    entry["function"]["name"] += tc.function.name
+                if tc.function.arguments:
+                    entry["function"]["arguments"] += tc.function.arguments
+
+    tool_calls = [assembled[k] for k in sorted(assembled.keys())]
+    return reasoning, content, tool_calls, events
+
+
+def _run_tool_call(tc: dict[str, Any]) -> tuple[str, ToolResult | None, list[ChatAction], str]:
+    name = tc["function"]["name"]
+    args_str = tc["function"].get("arguments") or "{}"
+    try:
+        args = json.loads(args_str)
+    except json.JSONDecodeError:
+        args = {}
+
+    tool = AVAILABLE_TOOLS.get(name)
+    if tool is None:
+        result = json.dumps({"error": f"unknown tool: {name}"}, ensure_ascii=False)
+        return result, None, [], result
+
+    output = tool.invoke(args)
+    output_str = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+    tool_result, actions, summary = _extract_tool_result(name, output_str)
+    return output_str, tool_result, actions, summary
+
+
 def _extract_tool_result(tool_name: str, output_str: str) -> tuple[ToolResult | None, list[ChatAction], str]:
-    """tool 출력 JSON에서 ToolResult, actions, 요약 문자열을 추출한다."""
     actions: list[ChatAction] = []
     summary = output_str[:2000]
     try:
@@ -189,122 +213,61 @@ async def run_coordinator(
     history: list[dict] = [],
     context: dict = {},
 ) -> ChatResponse:
-    """
-    coordinator를 실행하여 사용자 메시지에 대한 응답을 생성한다.
-    """
     try:
-        agent = _build_agent()
+        client = _make_client()
         messages = _build_messages(history, context, message)
-        response = agent.invoke({"messages": messages})
-
-        # 마지막 AIMessage에서 최종 답변 추출
-        response_messages = response.get("messages", [])
-        answer = ""
-        thinking = ""
-        for msg in reversed(response_messages):
-            if isinstance(msg, AIMessage) and msg.content:
-                extracted_answer, extracted_thinking = _extract_content_parts(msg.content)
-                answer = extracted_answer or answer
-                thinking = extracted_thinking or _extract_reasoning_from_message(msg) or thinking
-                if answer:
-                    break
-
-        # 중간 단계 수집 (AIMessage tool_calls + ToolMessage 쌍)
-        TOOL_LABELS = {
-            "graph_schema_tool":        "스키마 조회",
-            "graph_cypher_qa_tool":     "Cypher 생성 및 실행",
-            "graph_query_tool":         "Cypher 직접 실행",
-            "table_summary_tool":       "데이터 요약",
-            "chart_recommendation_tool": "차트 추천",
-        }
-        # tool_call_id → input 매핑
-        tool_inputs: dict[str, str] = {}
-        for msg in response_messages:
-            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                for tc in msg.tool_calls:
-                    args = tc.get("args", {})
-                    tool_inputs[tc["id"]] = next(iter(args.values()), "") if args else ""
-
         steps: list[StepInfo] = []
-        for msg in response_messages:
-            if not isinstance(msg, ToolMessage):
-                continue
-            tool_key = getattr(msg, "name", "")
-            tool_call_id = getattr(msg, "tool_call_id", "")
-            raw_input = tool_inputs.get(tool_call_id, "")
+        all_actions: list[ChatAction] = []
+        final_tool_result = ToolResult()
+        final_answer = ""
+        thinking_parts: list[str] = []
 
-            # output 요약
-            try:
-                data = json.loads(msg.content)
-                if "error" in data:
-                    output_summary = f"오류: {data['error']}"
-                elif data.get("cypher"):
-                    row_count = data.get("row_count", "?")
-                    output_summary = f"{row_count}건 반환\n```cypher\n{data['cypher']}\n```"
-                elif isinstance(data, dict):
-                    output_summary = str(data)[:2000]
-                else:
-                    output_summary = msg.content[:2000]
-            except Exception:
-                output_summary = msg.content[:2000]
+        for _ in range(8):
+            resp = client.chat.completions.create(
+                model=settings.coordinator_model,
+                messages=messages,
+                tools=OPENAI_TOOLS,
+                extra_body={"thinking": {"type": "enabled", "clear_thinking": False}},
+            )
+            msg = resp.choices[0].message
+            answer_piece = msg.content or ""
+            reasoning_piece = getattr(msg, "reasoning_content", None) or ""
+            tool_calls = [tc.model_dump() for tc in (msg.tool_calls or [])]
+            final_answer = answer_piece or final_answer
+            if reasoning_piece:
+                thinking_parts.append(reasoning_piece)
 
-            steps.append(StepInfo(
-                tool=TOOL_LABELS.get(tool_key, tool_key),
-                tool_key=tool_key,
-                input=str(raw_input)[:2000],
-                output=output_summary,
-            ))
+            if not tool_calls:
+                break
 
-        # ToolMessage에서 tool 결과 추출
-        tool_result = ToolResult()
-        actions: list[ChatAction] = []
+            messages.append({
+                "role": "assistant",
+                "content": answer_piece,
+                "reasoning_content": reasoning_piece,
+                "tool_calls": tool_calls,
+            })
 
-        for msg in response_messages:
-            if not isinstance(msg, ToolMessage):
-                continue
-            # ToolMessage의 name으로 tool 종류 파악
-            tool_name = getattr(msg, "name", "")
-            if tool_name not in ("graph_cypher_qa_tool", "graph_query_tool"):
-                continue
-            try:
-                data = json.loads(msg.content)
-                if "error" in data:
-                    continue
-
-                tool_result.cypher = data.get("cypher", "")
-                tool_result.graph = {
-                    "nodes": data.get("nodes", []),
-                    "edges": data.get("edges", []),
-                    "raw": data.get("result", []),
-                }
-                tool_result.table = data.get("result", [])
-                tool_result.summary = data.get("answer", "")
-
-                if data.get("cypher"):
-                    actions.append(ChatAction(type="apply_query", query=data["cypher"]))
-                if data.get("nodes"):
-                    actions.append(ChatAction(type="open_tab", tab="graph"))
-                elif data.get("result"):
-                    actions.append(ChatAction(type="open_tab", tab="table"))
-
-            except (json.JSONDecodeError, TypeError):
-                pass
+            for tc in tool_calls:
+                output_str, tool_result, actions, summary = _run_tool_call(tc)
+                tool_name = tc["function"]["name"]
+                input_preview = (tc["function"].get("arguments") or "")[:2000]
+                steps.append(StepInfo(tool=TOOL_LABELS.get(tool_name, tool_name), tool_key=tool_name, input=input_preview, output=summary))
+                if tool_result:
+                    final_tool_result = tool_result
+                    all_actions.extend(actions)
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output_str})
 
         return ChatResponse(
-            message=answer or "처리가 완료되었습니다.",
-            actions=actions,
-            tool_results=tool_result,
+            message=final_answer or "처리가 완료되었습니다.",
+            actions=all_actions,
+            tool_results=final_tool_result,
             steps=steps,
-            thinking=thinking or None,
+            thinking="".join(thinking_parts) or None,
         )
 
     except Exception as e:
         logger.error(f"coordinator 실행 실패: {e}", exc_info=True)
-        return ChatResponse(
-            message=f"처리 중 오류가 발생했습니다: {str(e)}",
-            actions=[],
-            tool_results=ToolResult(),
-        )
+        return ChatResponse(message=f"처리 중 오류가 발생했습니다: {str(e)}", actions=[], tool_results=ToolResult())
 
 
 async def stream_coordinator(
@@ -312,81 +275,56 @@ async def stream_coordinator(
     history: list[dict] = [],
     context: dict = {},
 ) -> AsyncGenerator[str, None]:
-    """
-    coordinator를 스트리밍으로 실행한다.
-    SSE 형식의 JSON 문자열을 yield한다.
-    이벤트 타입: step_start | step_end | token | done
-    """
-    agent = _build_agent()
+    client = _make_client()
     messages = _build_messages(history, context, message)
-
     steps: list[StepInfo] = []
     all_actions: list[ChatAction] = []
     final_tool_result = ToolResult()
     collected_thinking: list[str] = []
-    step_inputs: dict[str, str] = {}   # run_id → input
-    tools_running = 0
 
     try:
-        async for event in agent.astream_events({"messages": messages}, version="v2"):
-            kind = event["event"]
-            name = event.get("name", "")
-            run_id = event.get("run_id", "")
+        for _ in range(8):
+            stream = client.chat.completions.create(
+                model=settings.coordinator_model,
+                messages=messages,
+                tools=OPENAI_TOOLS,
+                stream=True,
+                extra_body={"thinking": {"type": "enabled", "clear_thinking": False}},
+            )
+            reasoning, content, tool_calls, events = _parse_tool_calls_from_stream(stream)
+            for event in events:
+                if event["type"] == "thinking_token":
+                    collected_thinking.append(event["content"])
+                yield json.dumps(event, ensure_ascii=False)
 
-            if kind == "on_tool_start" and name in TOOL_LABELS:
-                tools_running += 1
-                input_data = event["data"].get("input", {})
-                if isinstance(input_data, dict) and input_data:
-                    input_str = str(next(iter(input_data.values()), ""))[:2000]
-                else:
-                    input_str = str(input_data)[:2000]
-                step_inputs[run_id] = input_str
+            if not tool_calls:
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": content,
+                "reasoning_content": reasoning,
+                "tool_calls": tool_calls,
+            })
+
+            for tc in tool_calls:
+                tool_name = tc["function"]["name"]
+                input_preview = (tc["function"].get("arguments") or "")[:2000]
                 yield json.dumps({
                     "type": "step_start",
-                    "tool": TOOL_LABELS[name],
-                    "tool_key": name,
-                    "input": input_str,
+                    "tool": TOOL_LABELS.get(tool_name, tool_name),
+                    "tool_key": tool_name,
+                    "input": input_preview,
                 }, ensure_ascii=False)
 
-            elif kind == "on_tool_end" and name in TOOL_LABELS:
-                tools_running = max(0, tools_running - 1)
-                output = event["data"].get("output", "")
-                # astream_events v2에서 output은 ToolMessage 객체로 래핑될 수 있음
-                if hasattr(output, "content"):
-                    output_str = output.content if isinstance(output.content, str) else json.dumps(output.content)
-                elif isinstance(output, dict):
-                    output_str = json.dumps(output)
-                else:
-                    output_str = str(output)
-
-                tool_result, actions, summary = _extract_tool_result(name, output_str)
+                output_str, tool_result, actions, summary = _run_tool_call(tc)
+                steps.append(StepInfo(tool=TOOL_LABELS.get(tool_name, tool_name), tool_key=tool_name, input=input_preview, output=summary))
                 if tool_result:
                     final_tool_result = tool_result
                     all_actions.extend(actions)
 
-                step = StepInfo(
-                    tool=TOOL_LABELS[name],
-                    tool_key=name,
-                    input=step_inputs.pop(run_id, ""),
-                    output=summary,
-                )
-                steps.append(step)
-                yield json.dumps({
-                    "type": "step_end",
-                    "tool_key": name,
-                    "output": summary,
-                }, ensure_ascii=False)
-
-            elif kind == "on_chat_model_stream" and tools_running == 0:
-                chunk = event["data"].get("chunk")
-                if chunk:
-                    content, thinking = _extract_content_parts(getattr(chunk, "content", ""))
-                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
-                    if thinking:
-                        collected_thinking.append(thinking)
-                        yield json.dumps({"type": "thinking_token", "content": thinking}, ensure_ascii=False)
-                    if content and not tool_call_chunks:
-                        yield json.dumps({"type": "token", "content": content}, ensure_ascii=False)
+                yield json.dumps({"type": "step_end", "tool_key": tool_name, "output": summary}, ensure_ascii=False)
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output_str})
 
         yield json.dumps({
             "type": "done",
