@@ -4,6 +4,7 @@ Neo4j 연결 및 쿼리 실행 서비스
 """
 import time
 import logging
+from datetime import date, datetime, time as datetime_time
 from typing import Any
 from neo4j import GraphDatabase, graph as neo4j_graph
 from langchain_neo4j import Neo4jGraph
@@ -55,8 +56,23 @@ def check_connection() -> bool:
 
 def _serialize_value(value: Any) -> Any:
     """neo4j 값을 JSON 직렬화 가능한 형태로 변환"""
+    # neo4j temporal types(neo4j.time.DateTime 등)와 python datetime은 문자열로 변환
+    if isinstance(value, (datetime, date, datetime_time)):
+        return value.isoformat()
+    if hasattr(value, "iso_format") and callable(value.iso_format):
+        try:
+            return value.iso_format()
+        except Exception:
+            pass
+    if hasattr(value, "to_native") and callable(value.to_native):
+        try:
+            native = value.to_native()
+            if native is not value:
+                return _serialize_value(native)
+        except Exception:
+            pass
     if isinstance(value, (neo4j_graph.Node, neo4j_graph.Relationship)):
-        return dict(value)
+        return {k: _serialize_value(v) for k, v in dict(value).items()}
     if isinstance(value, (list, tuple)):
         return [_serialize_value(v) for v in value]
     if isinstance(value, dict):
