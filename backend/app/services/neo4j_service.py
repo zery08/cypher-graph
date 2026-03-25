@@ -133,7 +133,7 @@ def parse_graph_result(raw_results: list[dict]) -> GraphResult:
                     nodes[node_id] = GraphNode(
                         id=node_id,
                         labels=list(value.labels),
-                        properties=dict(value),
+                        properties={k: _serialize_value(v) for k, v in dict(value).items()},
                     )
             elif isinstance(value, neo4j_graph.Relationship):
                 edge_id = value.element_id
@@ -145,7 +145,7 @@ def parse_graph_result(raw_results: list[dict]) -> GraphResult:
                             type=value.type,
                             source=value.start_node.element_id,
                             target=value.end_node.element_id,
-                            properties=dict(value),
+                            properties={k: _serialize_value(v) for k, v in dict(value).items()},
                         )
                     )
 
