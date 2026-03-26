@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, Fragment } from 'react'
-import { Send, Loader2, ChevronRight, X } from 'lucide-react'
+import { Send, Loader2, ChevronRight, ChevronDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import ReactMarkdown from 'react-markdown'
@@ -42,7 +42,7 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
   )
 }
 
-// ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
+// ─── 중간 단계 표시 (접기/펼치기) ────────────────────────────────────────────
 
 function StepsList({
   steps,
@@ -51,38 +51,61 @@ function StepsList({
   steps: StepInfo[]
   isStreaming?: boolean
 }) {
+  // 스트리밍 중에는 펼침, 완료 후엔 기본 접힘
+  const [collapsed, setCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (!isStreaming && steps.length > 0) setCollapsed(true)
+  }, [isStreaming, steps.length])
+
   if (!steps.length) return null
 
   return (
-    <div className="max-w-[90%] text-xs flex flex-col gap-1.5 mb-1">
-      {steps.map((step, i) => (
-        <Fragment key={i}>
-          {/* 이 tool 호출 직전 추론 */}
-          {step.reasoning && (
-            <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
-              {step.reasoning}
-              {isStreaming && i === steps.length - 1 && step.output === '...' && (
-                <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
+    <div className="max-w-[90%] text-xs mb-1">
+      {/* 헤더 토글 */}
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="flex items-center gap-1.5 text-muted-foreground/60 hover:text-muted-foreground transition-colors mb-1"
+      >
+        {collapsed
+          ? <ChevronRight className="w-3 h-3" />
+          : <ChevronDown className="w-3 h-3" />
+        }
+        <span>추론 과정 · {steps.length}단계</span>
+      </button>
+
+      {!collapsed && (
+        <div className="flex flex-col gap-1.5 pl-1 border-l border-border/40">
+          {steps.map((step, i) => (
+            <Fragment key={i}>
+              {/* 이 tool 호출 직전 추론 */}
+              {step.reasoning && (
+                <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
+                  {step.reasoning}
+                  {isStreaming && i === steps.length - 1 && step.output === '...' && (
+                    <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
+                  )}
+                </div>
               )}
-            </div>
-          )}
-          {/* tool 호출 결과 */}
-          <div className="bg-muted/30 rounded px-2 py-1.5 space-y-0.5">
-            <div className="font-medium text-muted-foreground flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
-              {step.tool}
-              {step.output === '...' && (
-                <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50" />
-              )}
-            </div>
-            {step.output && step.output !== '...' && (
-              <div className="text-muted-foreground/70 whitespace-pre-wrap break-words">
-                {step.output}
+              {/* tool 호출 결과 */}
+              <div className="bg-muted/30 rounded px-2 py-1.5 space-y-0.5">
+                <div className="font-medium text-muted-foreground flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                  {step.tool}
+                  {step.output === '...' && (
+                    <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50" />
+                  )}
+                </div>
+                {step.output && step.output !== '...' && (
+                  <div className="text-muted-foreground/70 whitespace-pre-wrap break-words">
+                    {step.output}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </Fragment>
-      ))}
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -167,6 +190,7 @@ export function ChatPanel() {
 
   const [input, setInput] = useState('')
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -246,6 +270,7 @@ export function ChatPanel() {
     // 스트리밍 메시지 자리 생성
     const assistantId = addStreamingMessage()
     setStreamingMessageId(assistantId)
+    setStreamingStatus('생각 중...')
     const liveSteps: StepInfo[] = []
     let liveReasoning = ''
     let pendingStepReasoning = ''
@@ -256,8 +281,10 @@ export function ChatPanel() {
           liveReasoning += event.content
           updateMessage(assistantId, { reasoning: liveReasoning })
         } else if (event.type === 'token') {
+          setStreamingStatus('답변 생성 중...')
           appendToken(assistantId, event.content)
         } else if (event.type === 'step_start') {
+          setStreamingStatus(`도구 호출 중: ${event.tool}`)
           pendingStepReasoning = liveReasoning
           liveReasoning = ''  // 다음 step을 위해 초기화
           const step: StepInfo = {
@@ -270,6 +297,7 @@ export function ChatPanel() {
           liveSteps.push(step)
           updateMessage(assistantId, { steps: [...liveSteps], reasoning: null })
         } else if (event.type === 'step_end') {
+          setStreamingStatus('생각 중...')
           let idx = -1
           for (let i = liveSteps.length - 1; i >= 0; i--) {
             if (liveSteps[i].tool_key === event.tool_key && liveSteps[i].output === '...') { idx = i; break }
@@ -329,6 +357,7 @@ export function ChatPanel() {
     } finally {
       setLoading(false)
       setStreamingMessageId(null)
+      setStreamingStatus(null)
     }
   }
 
@@ -385,6 +414,14 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* 스트리밍 상태 배너 */}
+      {streamingStatus && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/5 border-b border-amber-500/10 shrink-0">
+          <Loader2 className="w-3 h-3 animate-spin text-amber-600/70 shrink-0" />
+          <span className="text-xs text-amber-700/70">{streamingStatus}</span>
+        </div>
+      )}
+
       {/* 메시지 목록 */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-3 p-3">
@@ -420,13 +457,6 @@ export function ChatPanel() {
               onAction={handleAction}
             />
           ))}
-
-          {isLoading && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-xs">분석 중...</span>
-            </div>
-          )}
 
           <div ref={bottomRef} />
         </div>
