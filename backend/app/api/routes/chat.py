@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.llm.coordinator import run_coordinator, stream_coordinator
+from app.llm.coordinator_v3 import run_coordinator, stream_coordinator
 from app.core.auth import get_current_user_optional
 from app.core.database import get_db
 from app.models.conversation import Conversation, Message
