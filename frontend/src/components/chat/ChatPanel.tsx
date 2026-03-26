@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, Fragment } from 'react'
-import { Send, Loader2, ChevronRight, X, Bot } from 'lucide-react'
+import { Send, Loader2, ChevronRight, X, Bot, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import ReactMarkdown from 'react-markdown'
@@ -87,6 +87,48 @@ function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean
   )
 }
 
+// ─── 도구 항목 (접기/펼치기) ─────────────────────────────────────────────────
+
+function ToolItem({ step, isStreaming }: { step: StepInfo; isStreaming: boolean }) {
+  const [open, setOpen] = useState(false)
+  const isPending = step.output === '...'
+
+  // 완료되면 접힌 채로 유지
+  useEffect(() => {
+    if (!isPending) setOpen(false)
+  }, [isPending])
+
+  const inputPreview = step.input ? ` ${step.input.slice(0, 50)}${step.input.length > 50 ? '…' : ''}` : ''
+
+  return (
+    <div className="flex gap-2 items-start">
+      <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-green-500/80 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center gap-1 text-left hover:opacity-80 transition-opacity"
+        >
+          <span className="font-semibold text-green-600">{step.tool}</span>
+          {inputPreview && !open && (
+            <span className="text-muted-foreground/50 font-normal truncate">{inputPreview}</span>
+          )}
+          {!isPending && (
+            <ChevronRight className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`} />
+          )}
+          {isPending && isStreaming && (
+            <Loader2 className="w-2.5 h-2.5 animate-spin text-green-500/60 ml-0.5" />
+          )}
+        </button>
+        {open && step.output && step.output !== '...' && (
+          <div className="mt-1 text-muted-foreground/55 whitespace-pre-wrap break-words leading-relaxed">
+            {step.output}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
 function StepsList({ steps, isStreaming = false }: { steps: StepInfo[]; isStreaming?: boolean }) {
@@ -102,23 +144,7 @@ function StepsList({ steps, isStreaming = false }: { steps: StepInfo[]; isStream
               isStreaming={isStreaming && step.output === '...'}
             />
           )}
-          {/* 도구 호출 — 초록색 */}
-          <div className="flex gap-2 items-start">
-            <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-green-500/80 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-green-600">{step.tool}</span>
-                {step.output === '...' && (
-                  <Loader2 className="w-2.5 h-2.5 animate-spin text-green-500/60" />
-                )}
-              </div>
-              {step.output && step.output !== '...' && (
-                <div className="text-muted-foreground/55 mt-0.5 whitespace-pre-wrap break-words leading-relaxed">
-                  {step.output}
-                </div>
-              )}
-            </div>
-          </div>
+          <ToolItem step={step} isStreaming={isStreaming} />
         </Fragment>
       ))}
     </div>
@@ -164,23 +190,25 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
           <StepsList steps={steps ?? []} isStreaming={isStreaming} />
         )}
 
-        {/* 답변 생성 전 상태 표시 */}
+        {/* 상태 표시 — 주황색 아이콘 + 텍스트, 답변 시작 후 사라짐 */}
         {isStreaming && !content && streamingStatus && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
-            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-            <span>{streamingStatus}</span>
+          <div className="flex items-center gap-1.5 text-xs text-orange-500/80">
+            <Sparkles className="w-3 h-3 shrink-0 animate-pulse" />
+            <span className="font-medium">{streamingStatus}</span>
           </div>
         )}
 
         {/* 답변 버블 */}
         {content && (
           <div className="max-w-[95%] rounded-lg px-3 py-2 text-sm leading-relaxed bg-background border border-border/40 text-foreground">
-            <div className="prose prose-sm max-w-none break-words
-              [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5
-              [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
-              [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:text-xs
-              [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold
-              [&_strong]:font-semibold [&_a]:text-primary [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:opacity-70">
+            <div className="prose prose-sm prose-neutral max-w-none break-words
+              prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5
+              prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground
+              prose-li:text-foreground prose-blockquote:text-muted-foreground
+              prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+              prose-pre:bg-muted prose-pre:text-foreground prose-pre:text-xs prose-pre:overflow-x-auto
+              prose-a:text-primary prose-blockquote:border-l-2 prose-blockquote:pl-2
+              prose-h1:text-base prose-h2:text-sm prose-h3:text-sm">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
           </div>
