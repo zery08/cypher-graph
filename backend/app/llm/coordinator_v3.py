@@ -14,10 +14,41 @@ from datetime import datetime
 from typing import AsyncGenerator, Optional, Any
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
+from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, create_model
 from deepagents import create_deep_agent
+
+
+class ReasoningChatOpenAI(ChatOpenAI):
+    """
+    GLM-4.7 등 model_extra['reasoning'] 필드를 반환하는 모델용 ChatOpenAI 래퍼.
+    LangChain이 기본적으로 무시하는 delta['reasoning']을
+    AIMessageChunk.additional_kwargs['reasoning']으로 전달한다.
+    """
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict,
+        default_chunk_class: type,
+        base_generation_info: dict | None,
+    ) -> ChatGenerationChunk | None:
+        gen = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info
+        )
+        if gen is None:
+            return None
+
+        # delta에서 reasoning 추출 후 additional_kwargs에 주입
+        choices = chunk.get("choices") or chunk.get("chunk", {}).get("choices") or []
+        if choices:
+            delta = choices[0].get("delta") or {}
+            reasoning = delta.get("reasoning") or ""
+            if reasoning and isinstance(gen.message, AIMessageChunk):
+                gen.message.additional_kwargs["reasoning"] = reasoning
+
+        return gen
 
 from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
@@ -80,7 +111,7 @@ async def stream_coordinator(
     tool_defs = load_all_tools()
     tools_by_name = {t.name: t for t in tool_defs}
 
-    llm = ChatOpenAI(
+    llm = ReasoningChatOpenAI(
         model=settings.coordinator_model,
         api_key=settings.coordinator_api_key,
         base_url=settings.coordinator_base_url,
