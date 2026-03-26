@@ -113,8 +113,10 @@ async def stream_coordinator(
     accumulated_actions: list[ChatAction] = []
     accumulated_tool_result = ToolResult()
     steps: list[StepInfo] = []
-    pending_calls: dict[str, dict] = {}   # call_id → {name, args_parts}
-    emitted_starts: set[str] = set()
+    # index(int) → {id, name, args_parts}
+    # tool_call_chunk 첫 번째에만 id가 오고 이후엔 None이므로 index를 primary key로 사용
+    pending_calls: dict[int, dict] = {}
+    emitted_starts: set[int] = set()
 
     try:
         async for chunk, metadata in agent.astream(
@@ -122,6 +124,8 @@ async def stream_coordinator(
             config={"configurable": {"thread_id": str(uuid.uuid4())}},
             stream_mode="messages",
         ):
+            node = metadata.get("langgraph_node", "")
+
             if isinstance(chunk, AIMessageChunk):
                 # 1) reasoning (additional_kwargs 방식 - OpenRouter 등)
                 ak = chunk.additional_kwargs or {}
@@ -130,43 +134,52 @@ async def stream_coordinator(
                     accumulated_reasoning += rc
                     yield json.dumps({"type": "reasoning_token", "content": rc}, ensure_ascii=False)
 
-                # 2) 텍스트 토큰 (<think> 태그 포함 가능)
-                raw = chunk.content if isinstance(chunk.content, str) else "".join(
-                    b.get("text", "") for b in chunk.content
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
-                # Claude thinking 블록
-                if isinstance(chunk.content, list):
-                    thinking = "\n".join(
-                        b.get("thinking", "") for b in chunk.content
-                        if isinstance(b, dict) and b.get("type") == "thinking"
+                # 2) 텍스트 토큰 — model 노드의 최종 응답만 yield
+                #    tools 노드의 AIMessageChunk는 GraphCypherQAChain 내부 출력이므로 무시
+                if node == "model":
+                    raw = chunk.content if isinstance(chunk.content, str) else "".join(
+                        b.get("text", "") for b in chunk.content
+                        if isinstance(b, dict) and b.get("type") == "text"
                     )
-                    if thinking:
-                        accumulated_reasoning += thinking
-                        yield json.dumps({"type": "reasoning_token", "content": thinking}, ensure_ascii=False)
+                    # Claude thinking 블록
+                    if isinstance(chunk.content, list):
+                        thinking = "\n".join(
+                            b.get("thinking", "") for b in chunk.content
+                            if isinstance(b, dict) and b.get("type") == "thinking"
+                        )
+                        if thinking:
+                            accumulated_reasoning += thinking
+                            yield json.dumps({"type": "reasoning_token", "content": thinking}, ensure_ascii=False)
 
-                if raw:
-                    tag_reasoning, clean = _split_think_content(raw)
-                    if tag_reasoning:
-                        accumulated_reasoning += tag_reasoning
-                        yield json.dumps({"type": "reasoning_token", "content": tag_reasoning}, ensure_ascii=False)
-                    if clean and not pending_calls:
-                        yield json.dumps({"type": "token", "content": clean}, ensure_ascii=False)
+                    if raw:
+                        tag_reasoning, clean = _split_think_content(raw)
+                        if tag_reasoning:
+                            accumulated_reasoning += tag_reasoning
+                            yield json.dumps({"type": "reasoning_token", "content": tag_reasoning}, ensure_ascii=False)
+                        # tool call 대기 중이 아닐 때만 토큰 전송
+                        if clean and not pending_calls:
+                            yield json.dumps({"type": "token", "content": clean}, ensure_ascii=False)
 
-                # 3) tool call 청크 누적 + step_start
+                # 3) tool call 청크 누적
+                #    첫 chunk: index=N, id="call_xxx", name="tool_name", args=""
+                #    이후 chunk: index=N, id=None, name=None, args="{...}"
+                #    → index를 key로 사용해 하나의 entry에 합산
                 for tc in chunk.tool_call_chunks or []:
-                    cid = str(tc.get("id") or tc.get("index", ""))
-                    if cid not in pending_calls:
-                        pending_calls[cid] = {"name": "", "args_parts": []}
+                    idx = tc.get("index") or 0
+                    if idx not in pending_calls:
+                        pending_calls[idx] = {"id": None, "name": "", "args_parts": []}
+                    if tc.get("id"):
+                        pending_calls[idx]["id"] = tc["id"]
                     if tc.get("name"):
-                        pending_calls[cid]["name"] += tc["name"]
+                        pending_calls[idx]["name"] += tc["name"]
                     if tc.get("args"):
-                        pending_calls[cid]["args_parts"].append(tc["args"])
+                        pending_calls[idx]["args_parts"].append(tc["args"])
 
-                for cid, tc in pending_calls.items():
-                    if tc["name"] and cid not in emitted_starts:
+                # 이름이 완성된 entry에 step_start 전송
+                for idx, tc in pending_calls.items():
+                    if tc["name"] and idx not in emitted_starts:
                         td = tools_by_name.get(tc["name"])
-                        emitted_starts.add(cid)
+                        emitted_starts.add(idx)
                         yield json.dumps({
                             "type": "step_start",
                             "tool": td.label if td else tc["name"],
@@ -182,12 +195,12 @@ async def stream_coordinator(
 
                 tool_result, actions, summary = _parse_tool_result(fn_name, output)
 
-                # 누적
+                # tool_result 누적
                 if tool_result:
-                    for field in ("graph", "table", "chart", "cypher"):
-                        val = getattr(tool_result, field, None)
+                    for f in ("graph", "table", "chart", "cypher"):
+                        val = getattr(tool_result, f, None)
                         if val is not None:
-                            setattr(accumulated_tool_result, field, val)
+                            setattr(accumulated_tool_result, f, val)
                     if tool_result.summary:
                         accumulated_tool_result.summary = (
                             f"{accumulated_tool_result.summary}\n{tool_result.summary}".strip()
@@ -200,9 +213,12 @@ async def stream_coordinator(
                         accumulated_actions.append(a)
                         seen.add(key)
 
-                # pending_calls 정리 + args 복원
-                cid = chunk.tool_call_id or ""
-                args_str = "".join(pending_calls.pop(cid, {}).get("args_parts", []))
+                # tool_call_id로 pending_calls에서 해당 entry 찾아 제거
+                call_id = chunk.tool_call_id or ""
+                key_to_remove = next((k for k, v in pending_calls.items() if v.get("id") == call_id), None)
+                args_str = ""
+                if key_to_remove is not None:
+                    args_str = "".join(pending_calls.pop(key_to_remove)["args_parts"])
 
                 steps.append(StepInfo(
                     tool=td.label if td else fn_name,
