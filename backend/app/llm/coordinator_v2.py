@@ -223,7 +223,7 @@ def _split_think_content(text: str) -> tuple[str, str]:
     returns: (reasoning, clean_content)
     """
     reasoning_parts = _THINK_TAG_RE.findall(text)
-    clean = _THINK_TAG_RE.sub("", text).strip()
+    clean = _THINK_TAG_RE.sub("", text)
     return "\n".join(reasoning_parts).strip(), clean
 
 
