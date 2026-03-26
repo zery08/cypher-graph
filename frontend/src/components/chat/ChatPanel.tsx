@@ -44,32 +44,55 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
 
 // ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
-function StepsList({ steps, reasoning }: { steps: StepInfo[]; reasoning?: string | null }) {
+function StepsList({
+  steps,
+  reasoning,
+  isStreaming = false,
+}: {
+  steps: StepInfo[]
+  reasoning?: string | null
+  isStreaming?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const hasSteps = steps.length > 0
+  const hasReasoning = !!reasoning
   const toolSummary = steps.map((s) => s.tool).join(', ')
 
-  if (!hasSteps && !reasoning) return null
+  // 스트리밍 중에는 항상 열린 상태
+  const isOpen = isStreaming || open
+
+  if (!hasSteps && !hasReasoning) return null
 
   return (
     <div className="max-w-[90%] text-xs">
       <button
-        onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1.5 text-muted-foreground/70 hover:text-muted-foreground transition-colors mb-1"
+        onClick={() => { if (!isStreaming) setOpen(v => !v) }}
+        className={`flex items-center gap-1.5 mb-1 transition-colors ${
+          isStreaming
+            ? 'text-amber-600/80 cursor-default'
+            : 'text-muted-foreground/70 hover:text-muted-foreground cursor-pointer'
+        }`}
       >
-        <ChevronRight className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {isStreaming ? (
+          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+        ) : (
+          <ChevronRight className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+        )}
         <span>
-          실행 과정
-          {hasSteps ? ` — ${steps.length}개 도구 사용됨` : ''}
-          {toolSummary ? ` · ${toolSummary}` : ''}
+          {isStreaming ? '추론 중...' : '실행 과정'}
+          {!isStreaming && hasSteps ? ` — ${steps.length}개 도구 사용됨` : ''}
+          {!isStreaming && toolSummary ? ` · ${toolSummary}` : ''}
         </span>
       </button>
 
-      {open && (
+      {isOpen && (
         <div className="flex flex-col gap-2 pl-4 border-l border-border/50">
-          {reasoning && (
+          {hasReasoning && (
             <div className="bg-amber-50/60 border border-amber-200/50 rounded px-2 py-1.5 text-amber-800/80 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
-              <div className="font-medium text-amber-700/80 mb-1">추론 과정</div>
+              <div className="font-medium text-amber-700/80 mb-1 flex items-center gap-1">
+                추론 과정
+                {isStreaming && <span className="inline-block w-1.5 h-3.5 bg-amber-500/70 rounded-sm animate-pulse ml-0.5" />}
+              </div>
               {reasoning}
             </div>
           )}
@@ -103,15 +126,16 @@ interface MessageBubbleProps {
   actions?: ChatAction[]
   steps?: StepInfo[]
   reasoning?: string | null
+  isStreaming?: boolean
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, actions, steps, reasoning, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, actions, steps, reasoning, isStreaming, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      {!isUser && <StepsList steps={steps ?? []} reasoning={reasoning} />}
+      {!isUser && <StepsList steps={steps ?? []} reasoning={reasoning} isStreaming={isStreaming} />}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser
@@ -174,6 +198,7 @@ export function ChatPanel() {
   } = useWorkspaceStore()
 
   const [input, setInput] = useState('')
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -252,6 +277,7 @@ export function ChatPanel() {
 
     // 스트리밍 메시지 자리 생성
     const assistantId = addStreamingMessage()
+    setStreamingMessageId(assistantId)
     const liveSteps: StepInfo[] = []
     let liveReasoning = ''
     let pendingStepReasoning = ''
@@ -326,6 +352,7 @@ export function ChatPanel() {
       updateMessage(assistantId, { content: '오류가 발생했습니다. 백엔드 서버를 확인해주세요.' })
     } finally {
       setLoading(false)
+      setStreamingMessageId(null)
     }
   }
 
@@ -414,6 +441,7 @@ export function ChatPanel() {
               actions={msg.actions}
               steps={msg.steps}
               reasoning={msg.reasoning}
+              isStreaming={msg.id === streamingMessageId}
               onAction={handleAction}
             />
           ))}
