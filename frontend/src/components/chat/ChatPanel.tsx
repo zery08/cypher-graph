@@ -186,9 +186,9 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
 
         {/* 상태 표시 — 주황색 아이콘 + 텍스트, 답변 시작 후 사라짐 */}
         {isStreaming && !content && streamingStatus && (
-          <div className="flex items-center gap-1.5 text-xs text-orange-500/80">
-            <Sparkles className="w-3 h-3 shrink-0 animate-pulse" />
-            <span className="font-medium">{streamingStatus}</span>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+            <Sparkles className="w-3 h-3 shrink-0 animate-pulse text-orange-400/70" />
+            <span>{streamingStatus}</span>
           </div>
         )}
 
