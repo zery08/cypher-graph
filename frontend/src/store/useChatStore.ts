@@ -7,6 +7,7 @@ export interface ChatEntry {
   id: string
   role: 'user' | 'assistant'
   content: string
+  preContent?: string       // 툴 호출 전 LLM이 내뱉은 텍스트
   actions?: ChatAction[]
   steps?: StepInfo[]
   toolResults?: ToolResult
@@ -24,6 +25,7 @@ interface ChatState {
   addMessage: (entry: Omit<ChatEntry, 'id' | 'timestamp'>) => string
   addStreamingMessage: () => string
   appendToken: (id: string, token: string) => void
+  appendPreToken: (id: string, token: string) => void
   updateMessage: (id: string, updates: Partial<Omit<ChatEntry, 'id' | 'timestamp'>>) => void
   setLoading: (loading: boolean) => void
   setContextSnapshot: (snapshot: string | null) => void
@@ -67,6 +69,13 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => ({
       messages: state.messages.map((m) =>
         m.id === id ? { ...m, content: m.content + token } : m
+      ),
+    })),
+
+  appendPreToken: (id, token) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, preContent: (m.preContent ?? '') + token } : m
       ),
     })),
 

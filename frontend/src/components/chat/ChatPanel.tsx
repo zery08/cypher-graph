@@ -156,6 +156,7 @@ function StepsList({ steps, isStreaming = false }: { steps: StepInfo[]; isStream
 interface MessageBubbleProps {
   role: 'user' | 'assistant'
   content: string
+  preContent?: string
   actions?: ChatAction[]
   steps?: StepInfo[]
   isStreaming?: boolean
@@ -163,7 +164,7 @@ interface MessageBubbleProps {
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, actions, steps, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, preContent, actions, steps, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   if (isUser) {
@@ -179,9 +180,16 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
   // assistant
   return (
     <div className="flex flex-col gap-1">
-        {/* 추론/도구 단계 */}
-        {(steps?.length ?? 0) > 0 && (
-          <StepsList steps={steps ?? []} isStreaming={isStreaming} />
+        {/* 툴 호출 전 LLM 텍스트 + 추론/도구 단계 */}
+        {((steps?.length ?? 0) > 0 || preContent) && (
+          <div className="text-xs flex flex-col gap-2 mb-1 w-full">
+            {preContent && (
+              <p className="text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
+                {preContent}
+              </p>
+            )}
+            <StepsList steps={steps ?? []} isStreaming={isStreaming} />
+          </div>
         )}
 
         {/* 상태 표시 — 주황색 아이콘 + 텍스트, 답변 시작 후 사라짐 */}
@@ -231,6 +239,7 @@ export function ChatPanel() {
     addMessage,
     addStreamingMessage,
     appendToken,
+    appendPreToken,
     updateMessage,
     setLoading,
     contextSnapshot,
@@ -334,6 +343,8 @@ export function ChatPanel() {
     const liveSteps: StepInfo[] = []
     let liveReasoning = ''
     let pendingStepReasoning = ''
+    let stepsStarted = false   // 첫 step_start 이후 true
+    let stepsFinished = false  // 마지막 step_end 이후 true (다음 token은 최종 답변)
 
     try {
       for await (const event of streamChatMessage(text, history, context)) {
@@ -341,9 +352,23 @@ export function ChatPanel() {
           liveReasoning += event.content
           updateMessage(assistantId, { reasoning: liveReasoning })
         } else if (event.type === 'token') {
-          setStreamingStatus(null)  // 답변 시작하면 상태 표시 제거
-          appendToken(assistantId, event.content)
+          if (!stepsStarted || stepsFinished) {
+            // 툴 호출 전 또는 모든 툴 완료 후
+            if (!stepsStarted) {
+              // 툴 호출 전 내뱉은 말 → steps 섹션에 포함
+              appendPreToken(assistantId, event.content)
+            } else {
+              // 최종 답변
+              setStreamingStatus(null)
+              appendToken(assistantId, event.content)
+            }
+          } else {
+            // step 진행 중 토큰 (거의 없지만 안전하게)
+            appendPreToken(assistantId, event.content)
+          }
         } else if (event.type === 'step_start') {
+          stepsStarted = true
+          stepsFinished = false
           setStreamingStatus(`도구 호출 중: ${event.tool}`)
           pendingStepReasoning = liveReasoning
           liveReasoning = ''  // 다음 step을 위해 초기화
@@ -357,6 +382,7 @@ export function ChatPanel() {
           liveSteps.push(step)
           updateMessage(assistantId, { steps: [...liveSteps], reasoning: null })
         } else if (event.type === 'step_end') {
+          stepsFinished = true
           setStreamingStatus('생각 중...')
           let idx = -1
           for (let i = liveSteps.length - 1; i >= 0; i--) {
@@ -503,6 +529,7 @@ export function ChatPanel() {
               key={msg.id}
               role={msg.role}
               content={msg.content}
+              preContent={msg.preContent}
               actions={msg.actions}
               steps={msg.steps}
               isStreaming={msg.id === streamingMessageId}
