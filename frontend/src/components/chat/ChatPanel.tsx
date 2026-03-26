@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, Fragment } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { Send, Loader2, ChevronRight, X, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -87,13 +87,36 @@ function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean
   )
 }
 
+// ─── 타임라인 행 래퍼 ────────────────────────────────────────────────────────
+
+function TimelineRow({
+  dot,
+  isLast,
+  children,
+}: {
+  dot: React.ReactNode
+  isLast: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex gap-2 items-start">
+      {/* 왼쪽: 불릿 + 연결선 */}
+      <div className="flex flex-col items-center shrink-0 w-2">
+        {dot}
+        {!isLast && <div className="w-px bg-border/40 flex-1 mt-0.5 min-h-[10px]" />}
+      </div>
+      {/* 오른쪽: 내용 */}
+      <div className="flex-1 min-w-0 pb-1.5">{children}</div>
+    </div>
+  )
+}
+
 // ─── 도구 항목 (접기/펼치기) ─────────────────────────────────────────────────
 
 function ToolItem({ step, isStreaming }: { step: StepInfo; isStreaming: boolean }) {
   const [open, setOpen] = useState(false)
   const isPending = step.output === '...'
 
-  // 완료되면 접힌 채로 유지
   useEffect(() => {
     if (!isPending) setOpen(false)
   }, [isPending])
@@ -101,52 +124,100 @@ function ToolItem({ step, isStreaming }: { step: StepInfo; isStreaming: boolean 
   const inputPreview = step.input ? ` ${step.input.slice(0, 50)}${step.input.length > 50 ? '…' : ''}` : ''
 
   return (
-    <div className="flex gap-2 items-start">
-      <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-green-500/80 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1 text-left hover:opacity-80 transition-opacity"
-        >
-          <span className="font-semibold text-green-600">{step.tool}</span>
-          {inputPreview && !open && (
-            <span className="text-muted-foreground/50 font-normal truncate">{inputPreview}</span>
-          )}
-          {!isPending && (
-            <ChevronRight className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`} />
-          )}
-          {isPending && isStreaming && (
-            <Loader2 className="w-2.5 h-2.5 animate-spin text-green-500/60 ml-0.5" />
-          )}
-        </button>
-        {open && step.output && step.output !== '...' && (
-          <div className="mt-1 text-muted-foreground/55 whitespace-pre-wrap break-words leading-relaxed">
-            {step.output}
-          </div>
-        )}
-      </div>
-    </div>
+    <button
+      onClick={() => setOpen(o => !o)}
+      className="flex items-center gap-1 text-left hover:opacity-75 transition-opacity w-full"
+    >
+      <span className="font-semibold text-foreground/70">{step.tool}</span>
+      {inputPreview && !open && (
+        <span className="text-muted-foreground/50 font-normal truncate">{inputPreview}</span>
+      )}
+      {!isPending && (
+        <ChevronRight className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`} />
+      )}
+      {isPending && isStreaming && (
+        <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/40 ml-0.5" />
+      )}
+      {open && step.output && step.output !== '...' && (
+        <div className="mt-1 text-muted-foreground/55 whitespace-pre-wrap break-words leading-relaxed w-full">
+          {step.output}
+        </div>
+      )}
+    </button>
   )
 }
 
 // ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
-function StepsList({ steps, isStreaming = false }: { steps: StepInfo[]; isStreaming?: boolean }) {
-  if (!steps.length) return null
+function StepsList({
+  steps,
+  preContent,
+  isStreaming = false,
+}: {
+  steps: StepInfo[]
+  preContent?: string
+  isStreaming?: boolean
+}) {
+  if (!steps.length && !preContent) return null
+
+  // 타임라인 아이템 목록 구성
+  type TItem =
+    | { kind: 'pre'; text: string }
+    | { kind: 'thought'; text: string; stepIdx: number }
+    | { kind: 'tool'; step: StepInfo; stepIdx: number }
+
+  const items: TItem[] = []
+  steps.forEach((step, i) => {
+    if (i === 0 && preContent) items.push({ kind: 'pre', text: preContent })
+    if (step.reasoning) items.push({ kind: 'thought', text: step.reasoning, stepIdx: i })
+    items.push({ kind: 'tool', step, stepIdx: i })
+  })
+  // steps가 없고 preContent만 있을 때
+  if (!steps.length && preContent) items.push({ kind: 'pre', text: preContent })
 
   return (
-    <div className="text-xs flex flex-col gap-2 mb-1 w-full">
-      {steps.map((step, i) => (
-        <Fragment key={i}>
-          {step.reasoning && (
-            <ThoughtItem
-              text={step.reasoning}
-              isStreaming={isStreaming && step.output === '...'}
-            />
-          )}
-          <ToolItem step={step} isStreaming={isStreaming} />
-        </Fragment>
-      ))}
+    <div className="text-xs flex flex-col mb-1 w-full">
+      {items.map((item, idx) => {
+        const isLast = idx === items.length - 1
+        if (item.kind === 'pre') {
+          return (
+            <TimelineRow
+              key={`pre-${idx}`}
+              dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/40 shrink-0" />}
+              isLast={isLast}
+            >
+              <p className="text-muted-foreground/65 whitespace-pre-wrap break-words leading-relaxed">
+                {item.text}
+              </p>
+            </TimelineRow>
+          )
+        }
+        if (item.kind === 'thought') {
+          const step = steps[item.stepIdx]
+          return (
+            <TimelineRow
+              key={`thought-${idx}`}
+              dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/50 shrink-0" />}
+              isLast={isLast}
+            >
+              <ThoughtItem
+                text={item.text}
+                isStreaming={isStreaming && step.output === '...'}
+              />
+            </TimelineRow>
+          )
+        }
+        // tool
+        return (
+          <TimelineRow
+            key={`tool-${idx}`}
+            dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/50 shrink-0" />}
+            isLast={isLast}
+          >
+            <ToolItem step={item.step} isStreaming={isStreaming} />
+          </TimelineRow>
+        )
+      })}
     </div>
   )
 }
@@ -180,16 +251,9 @@ function MessageBubble({ role, content, preContent, actions, steps, isStreaming,
   // assistant
   return (
     <div className="flex flex-col gap-1">
-        {/* 툴 호출 전 LLM 텍스트 + 추론/도구 단계 */}
+        {/* 추론/도구 단계 (preContent 포함) */}
         {((steps?.length ?? 0) > 0 || preContent) && (
-          <div className="text-xs flex flex-col gap-2 mb-1 w-full">
-            {preContent && (
-              <p className="text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
-                {preContent}
-              </p>
-            )}
-            <StepsList steps={steps ?? []} isStreaming={isStreaming} />
-          </div>
+          <StepsList steps={steps ?? []} preContent={preContent} isStreaming={isStreaming} />
         )}
 
         {/* 상태 표시 — 주황색 아이콘 + 텍스트, 답변 시작 후 사라짐 */}
@@ -383,7 +447,7 @@ export function ChatPanel() {
           updateMessage(assistantId, { steps: [...liveSteps], reasoning: null })
         } else if (event.type === 'step_end') {
           stepsFinished = true
-          setStreamingStatus('생각 중...')
+          setStreamingStatus('답변 생성 중...')
           let idx = -1
           for (let i = liveSteps.length - 1; i >= 0; i--) {
             if (liveSteps[i].tool_key === event.tool_key && liveSteps[i].output === '...') { idx = i; break }
