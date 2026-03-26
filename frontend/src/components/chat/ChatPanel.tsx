@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, Fragment } from 'react'
 import { Send, Loader2, ChevronRight, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -53,65 +53,51 @@ function StepsList({
   reasoning?: string | null
   isStreaming?: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const hasSteps = steps.length > 0
-  const hasReasoning = !!reasoning
-  const toolSummary = steps.map((s) => s.tool).join(', ')
-
-  // 스트리밍 중에는 항상 열린 상태
-  const isOpen = isStreaming || open
-
-  if (!hasSteps && !hasReasoning) return null
+  if (!steps.length && !reasoning) return null
 
   return (
-    <div className="max-w-[90%] text-xs">
-      <button
-        onClick={() => { if (!isStreaming) setOpen(v => !v) }}
-        className={`flex items-center gap-1.5 mb-1 transition-colors ${
-          isStreaming
-            ? 'text-amber-600/80 cursor-default'
-            : 'text-muted-foreground/70 hover:text-muted-foreground cursor-pointer'
-        }`}
-      >
-        {isStreaming ? (
-          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-        ) : (
-          <ChevronRight className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-        )}
-        <span>
-          {isStreaming ? '추론 중...' : '실행 과정'}
-          {!isStreaming && hasSteps ? ` — ${steps.length}개 도구 사용됨` : ''}
-          {!isStreaming && toolSummary ? ` · ${toolSummary}` : ''}
-        </span>
-      </button>
-
-      {isOpen && (
-        <div className="flex flex-col gap-2 pl-4 border-l border-border/50">
-          {hasReasoning && (
-            <div className="bg-amber-50/60 border border-amber-200/50 rounded px-2 py-1.5 text-amber-800/80 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto">
-              <div className="font-medium text-amber-700/80 mb-1 flex items-center gap-1">
-                추론 과정
-                {isStreaming && <span className="inline-block w-1.5 h-3.5 bg-amber-500/70 rounded-sm animate-pulse ml-0.5" />}
-              </div>
-              {reasoning}
+    <div className="max-w-[90%] text-xs flex flex-col gap-1.5 mb-1">
+      {steps.map((step, i) => (
+        <Fragment key={i}>
+          {/* 이 tool 호출 직전 추론 */}
+          {step.reasoning && (
+            <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
+              {step.reasoning}
             </div>
           )}
-          {steps.map((step, i) => (
-            <div key={i} className="bg-muted/30 rounded p-2 space-y-1">
-              <div className="font-medium text-muted-foreground flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
-                {step.tool}
-              </div>
-              {step.input && (
-                <div className="text-muted-foreground/60 whitespace-pre-wrap break-words">
-                  입력: {step.input}
-                </div>
+          {/* tool 호출 결과 */}
+          <div className="bg-muted/30 rounded px-2 py-1.5 space-y-0.5">
+            <div className="font-medium text-muted-foreground flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+              {step.tool}
+              {step.output === '...' && (
+                <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50" />
               )}
-              <div className="text-muted-foreground/80 whitespace-pre-wrap break-words">
+            </div>
+            {step.output && step.output !== '...' && (
+              <div className="text-muted-foreground/70 whitespace-pre-wrap break-words">
                 {step.output}
               </div>
-            </div>
-          ))}
+            )}
+          </div>
+        </Fragment>
+      ))}
+
+      {/* 마지막 추론 (tool 호출 이후 또는 스트리밍 중 실시간) */}
+      {reasoning && (
+        <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
+          {reasoning}
+          {isStreaming && (
+            <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
+          )}
+        </div>
+      )}
+
+      {/* tool 없이 추론만 있고 스트리밍 중일 때 spinner */}
+      {isStreaming && !reasoning && !steps.length && (
+        <div className="flex items-center gap-1.5 text-amber-600/70">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>추론 중...</span>
         </div>
       )}
     </div>
