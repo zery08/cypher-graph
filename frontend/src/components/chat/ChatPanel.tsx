@@ -46,14 +46,12 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
 
 function StepsList({
   steps,
-  reasoning,
   isStreaming = false,
 }: {
   steps: StepInfo[]
-  reasoning?: string | null
   isStreaming?: boolean
 }) {
-  if (!steps.length && !reasoning) return null
+  if (!steps.length) return null
 
   return (
     <div className="max-w-[90%] text-xs flex flex-col gap-1.5 mb-1">
@@ -63,6 +61,9 @@ function StepsList({
           {step.reasoning && (
             <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
               {step.reasoning}
+              {isStreaming && i === steps.length - 1 && step.output === '...' && (
+                <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
+              )}
             </div>
           )}
           {/* tool 호출 결과 */}
@@ -82,24 +83,6 @@ function StepsList({
           </div>
         </Fragment>
       ))}
-
-      {/* 마지막 추론 (tool 호출 이후 또는 스트리밍 중 실시간) */}
-      {reasoning && (
-        <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
-          {reasoning}
-          {isStreaming && (
-            <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
-          )}
-        </div>
-      )}
-
-      {/* tool 없이 추론만 있고 스트리밍 중일 때 spinner */}
-      {isStreaming && !reasoning && !steps.length && (
-        <div className="flex items-center gap-1.5 text-amber-600/70">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>추론 중...</span>
-        </div>
-      )}
     </div>
   )
 }
@@ -111,17 +94,16 @@ interface MessageBubbleProps {
   content: string
   actions?: ChatAction[]
   steps?: StepInfo[]
-  reasoning?: string | null
   isStreaming?: boolean
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, actions, steps, reasoning, isStreaming, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, actions, steps, isStreaming, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      {!isUser && <StepsList steps={steps ?? []} reasoning={reasoning} isStreaming={isStreaming} />}
+      {!isUser && <StepsList steps={steps ?? []} isStreaming={isStreaming} />}
       <div
         className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
           isUser
@@ -298,11 +280,19 @@ export function ChatPanel() {
           const toolResults = event.tool_results
           const actions = event.actions ?? []
 
+          // liveSteps를 유지해 per-step reasoning 보존
+          // event.steps의 output으로만 업데이트
+          if (event.steps) {
+            event.steps.forEach((s: StepInfo, i: number) => {
+              if (liveSteps[i]) liveSteps[i] = { ...liveSteps[i], output: s.output }
+            })
+          }
+
           updateMessage(assistantId, {
             actions,
-            steps: event.steps,
+            steps: [...liveSteps],
             toolResults: toolResults ?? undefined,
-            reasoning: event.reasoning ?? liveReasoning ?? null,
+            reasoning: null,
           })
 
           // tool 결과 반영
@@ -426,7 +416,6 @@ export function ChatPanel() {
               content={msg.content}
               actions={msg.actions}
               steps={msg.steps}
-              reasoning={msg.reasoning}
               isStreaming={msg.id === streamingMessageId}
               onAction={handleAction}
             />
