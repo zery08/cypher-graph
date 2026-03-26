@@ -102,10 +102,9 @@ function StepsList({
     <div className="max-w-[90%] text-xs mb-1">
       <button
         onClick={() => setCollapsed(c => !c)}
-        className="flex items-center gap-1.5 text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors mb-1.5"
+        className="flex items-center gap-1 text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors mb-1.5"
       >
         {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        <span>{steps.length}단계 추론 과정</span>
       </button>
 
       {!collapsed && (
