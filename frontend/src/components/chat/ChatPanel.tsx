@@ -42,6 +42,45 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
   )
 }
 
+// ─── 추론 항목 (개별 접기) ────────────────────────────────────────────────────
+
+function ThoughtItem({ text, isLast, isStreaming }: { text: string; isLast: boolean; isStreaming: boolean }) {
+  const [open, setOpen] = useState(isStreaming)
+
+  useEffect(() => {
+    if (!isStreaming) setOpen(false)
+  }, [isStreaming])
+
+  const preview = text.split('\n')[0].slice(0, 60) + (text.length > 60 ? '…' : '')
+
+  return (
+    <div className="flex gap-2">
+      <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-foreground/70 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center gap-1 text-foreground/80 hover:text-foreground transition-colors text-left w-full"
+        >
+          <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+          <span className="font-medium">생각</span>
+          {!open && <span className="text-muted-foreground/60 truncate ml-1">{preview}</span>}
+          {isStreaming && isLast && (
+            <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-1 shrink-0" />
+          )}
+        </button>
+        {open && (
+          <div className="mt-1 ml-4 text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
+            {text}
+            {isStreaming && isLast && (
+              <span className="inline-block w-1 h-3 bg-muted-foreground/40 rounded-sm animate-pulse ml-0.5 align-middle" />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── 중간 단계 표시 (접기/펼치기) ────────────────────────────────────────────
 
 function StepsList({
@@ -63,37 +102,41 @@ function StepsList({
     <div className="max-w-[90%] text-xs mb-1">
       <button
         onClick={() => setCollapsed(c => !c)}
-        className="flex items-center gap-1.5 text-muted-foreground/70 hover:text-muted-foreground transition-colors mb-1"
+        className="flex items-center gap-1.5 text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors mb-1.5"
       >
         {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        <span>추론 과정 · {steps.length}단계</span>
+        <span>{steps.length}단계 추론 과정</span>
       </button>
 
       {!collapsed && (
-        <div className="flex flex-col gap-1.5 pl-1 border-l border-border/30">
+        <div className="flex flex-col gap-2">
           {steps.map((step, i) => (
             <Fragment key={i}>
+              {/* 추론 텍스트 — 검정 계열, 개별 토글 */}
               {step.reasoning && (
-                <div className="text-muted-foreground/80 whitespace-pre-wrap break-words leading-relaxed pl-2">
-                  {step.reasoning}
-                  {isStreaming && i === steps.length - 1 && step.output === '...' && (
-                    <span className="inline-block w-1 h-3 bg-muted-foreground/30 rounded-sm animate-pulse ml-0.5 align-middle" />
-                  )}
-                </div>
+                <ThoughtItem
+                  text={step.reasoning}
+                  isLast={i === steps.length - 1}
+                  isStreaming={isStreaming && step.output === '...'}
+                />
               )}
-              <div className="pl-2 space-y-0.5">
-                <div className="text-muted-foreground/70 flex items-center gap-1.5">
-                  <span className="w-1 h-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                  {step.tool}
-                  {step.output === '...' && (
-                    <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/30" />
+
+              {/* 도구 호출 — 파란색 이름 */}
+              <div className="flex gap-2">
+                <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500/70 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-blue-500">{step.tool}</span>
+                    {step.output === '...' && (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin text-blue-400/60" />
+                    )}
+                  </div>
+                  {step.output && step.output !== '...' && (
+                    <div className="text-muted-foreground/60 mt-0.5 whitespace-pre-wrap break-words leading-relaxed">
+                      {step.output}
+                    </div>
                   )}
                 </div>
-                {step.output && step.output !== '...' && (
-                  <div className="text-muted-foreground/70 whitespace-pre-wrap break-words pl-2.5">
-                    {step.output}
-                  </div>
-                )}
               </div>
             </Fragment>
           ))}
