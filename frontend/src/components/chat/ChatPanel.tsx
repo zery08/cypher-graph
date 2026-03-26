@@ -63,26 +63,23 @@ function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean
   }, [isStreaming])
 
   return (
-    <div className="flex gap-2 items-start">
-      <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-foreground/60 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1 text-foreground/75 hover:text-foreground transition-colors text-left"
-        >
+    <div className="flex-1 min-w-0">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-foreground/75 hover:text-foreground transition-colors text-left"
+      >
           <span className="font-medium">Thought for {seconds}s</span>
           <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
           {isStreaming && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-0.5 shrink-0" />}
-        </button>
-        {open && (
-          <div className="mt-1 text-muted-foreground/60 whitespace-pre-wrap break-words leading-relaxed">
-            {text}
-            {isStreaming && (
-              <span className="inline-block w-1 h-3 bg-muted-foreground/40 rounded-sm animate-pulse ml-0.5 align-middle" />
-            )}
-          </div>
-        )}
-      </div>
+      </button>
+      {open && (
+        <div className="mt-1 text-muted-foreground/60 whitespace-pre-wrap break-words leading-relaxed">
+          {text}
+          {isStreaming && (
+            <span className="inline-block w-1 h-3 bg-muted-foreground/40 rounded-sm animate-pulse ml-0.5 align-middle" />
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -102,8 +99,8 @@ function TimelineRow({
     <div className="flex gap-2 items-start">
       {/* 왼쪽: 불릿 + 연결선 */}
       <div className="flex flex-col items-center shrink-0 w-2">
-        {dot}
-        {!isLast && <div className="w-px bg-border/40 flex-1 mt-0.5 min-h-[10px]" />}
+        <div className="mt-[4px] shrink-0">{dot}</div>
+        {!isLast && <div className="w-px bg-border/40 flex-1 mt-1 min-h-[8px]" />}
       </div>
       {/* 오른쪽: 내용 */}
       <div className="flex-1 min-w-0 pb-1.5">{children}</div>
