@@ -273,7 +273,11 @@ function MessageBubble({ role, content, preContent, actions, steps, isStreaming,
               prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
               prose-pre:bg-muted prose-pre:text-foreground prose-pre:text-xs prose-pre:overflow-x-auto
               prose-a:text-primary prose-blockquote:border-l-2 prose-blockquote:pl-2
-              prose-h1:text-base prose-h2:text-sm prose-h3:text-sm">
+              prose-h1:text-base prose-h2:text-sm prose-h3:text-sm
+              [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_table]:my-2
+              [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:bg-muted/60 [&_th]:text-foreground
+              [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_td]:text-foreground/80
+              [&_tr:nth-child(even)_td]:bg-muted/20">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
           </div>
