@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, Fragment } from 'react'
-import { Send, Loader2, ChevronRight, X, Bot, Sparkles } from 'lucide-react'
+import { Send, Loader2, ChevronRight, X, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import ReactMarkdown from 'react-markdown'
@@ -176,15 +176,9 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
     )
   }
 
-  // assistant — AI 아이콘 + 내용
+  // assistant
   return (
-    <div className="flex gap-2 items-start">
-      {/* AI 아이콘 */}
-      <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center shrink-0 mt-0.5">
-        <Bot className="w-3.5 h-3.5 text-foreground/60" />
-      </div>
-
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
         {/* 추론/도구 단계 */}
         {(steps?.length ?? 0) > 0 && (
           <StepsList steps={steps ?? []} isStreaming={isStreaming} />
@@ -224,7 +218,6 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
               ))}
           </div>
         )}
-      </div>
     </div>
   )
 }
