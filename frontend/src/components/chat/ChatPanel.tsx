@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, Fragment } from 'react'
-import { Send, Loader2, ChevronRight, ChevronDown, X } from 'lucide-react'
+import { Send, Loader2, ChevronRight, X, Bot } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import ReactMarkdown from 'react-markdown'
@@ -42,36 +42,42 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
   )
 }
 
-// ─── 추론 항목 (개별 접기) ────────────────────────────────────────────────────
+// ─── 추론 항목 (타이머 + 개별 접기) ─────────────────────────────────────────
 
-function ThoughtItem({ text, isLast, isStreaming }: { text: string; isLast: boolean; isStreaming: boolean }) {
-  const [open, setOpen] = useState(isStreaming)
+function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const [open, setOpen] = useState(true)
+  const [seconds, setSeconds] = useState(0)
+  const frozenRef = useRef(false)
 
+  // 스트리밍 중 초 카운트, 완료 시 freeze
   useEffect(() => {
-    if (!isStreaming) setOpen(false)
+    if (!isStreaming) {
+      frozenRef.current = true
+      setOpen(false)
+      return
+    }
+    const id = setInterval(() => {
+      if (!frozenRef.current) setSeconds(s => s + 1)
+    }, 1000)
+    return () => clearInterval(id)
   }, [isStreaming])
 
-  const preview = text.split('\n')[0].slice(0, 60) + (text.length > 60 ? '…' : '')
-
   return (
-    <div className="flex gap-2">
-      <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-foreground/70 shrink-0" />
+    <div className="flex gap-2 items-start">
+      <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-foreground/60 shrink-0" />
       <div className="flex-1 min-w-0">
         <button
           onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1 text-foreground/80 hover:text-foreground transition-colors text-left w-full"
+          className="flex items-center gap-1 text-foreground/75 hover:text-foreground transition-colors text-left"
         >
+          <span className="font-medium">Thought for {seconds}s</span>
           <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
-          <span className="font-medium">생각</span>
-          {!open && <span className="text-muted-foreground/60 truncate ml-1">{preview}</span>}
-          {isStreaming && isLast && (
-            <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-1 shrink-0" />
-          )}
+          {isStreaming && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-0.5 shrink-0" />}
         </button>
         {open && (
-          <div className="mt-1 ml-4 text-muted-foreground/70 whitespace-pre-wrap break-words leading-relaxed">
+          <div className="mt-1 text-muted-foreground/60 whitespace-pre-wrap break-words leading-relaxed">
             {text}
-            {isStreaming && isLast && (
+            {isStreaming && (
               <span className="inline-block w-1 h-3 bg-muted-foreground/40 rounded-sm animate-pulse ml-0.5 align-middle" />
             )}
           </div>
@@ -81,66 +87,40 @@ function ThoughtItem({ text, isLast, isStreaming }: { text: string; isLast: bool
   )
 }
 
-// ─── 중간 단계 표시 (접기/펼치기) ────────────────────────────────────────────
+// ─── 중간 단계 표시 ───────────────────────────────────────────────────────────
 
-function StepsList({
-  steps,
-  isStreaming = false,
-}: {
-  steps: StepInfo[]
-  isStreaming?: boolean
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  useEffect(() => {
-    if (!isStreaming && steps.length > 0) setCollapsed(true)
-  }, [isStreaming, steps.length])
-
+function StepsList({ steps, isStreaming = false }: { steps: StepInfo[]; isStreaming?: boolean }) {
   if (!steps.length) return null
 
   return (
-    <div className="max-w-[90%] text-xs mb-1">
-      <button
-        onClick={() => setCollapsed(c => !c)}
-        className="flex items-center gap-1 text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors mb-1.5"
-      >
-        {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-      </button>
-
-      {!collapsed && (
-        <div className="flex flex-col gap-2">
-          {steps.map((step, i) => (
-            <Fragment key={i}>
-              {/* 추론 텍스트 — 검정 계열, 개별 토글 */}
-              {step.reasoning && (
-                <ThoughtItem
-                  text={step.reasoning}
-                  isLast={i === steps.length - 1}
-                  isStreaming={isStreaming && step.output === '...'}
-                />
-              )}
-
-              {/* 도구 호출 — 파란색 이름 */}
-              <div className="flex gap-2">
-                <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-500/70 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-blue-500">{step.tool}</span>
-                    {step.output === '...' && (
-                      <Loader2 className="w-2.5 h-2.5 animate-spin text-blue-400/60" />
-                    )}
-                  </div>
-                  {step.output && step.output !== '...' && (
-                    <div className="text-muted-foreground/60 mt-0.5 whitespace-pre-wrap break-words leading-relaxed">
-                      {step.output}
-                    </div>
-                  )}
-                </div>
+    <div className="text-xs flex flex-col gap-2 mb-1 w-full">
+      {steps.map((step, i) => (
+        <Fragment key={i}>
+          {step.reasoning && (
+            <ThoughtItem
+              text={step.reasoning}
+              isStreaming={isStreaming && step.output === '...'}
+            />
+          )}
+          {/* 도구 호출 — 초록색 */}
+          <div className="flex gap-2 items-start">
+            <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-green-500/80 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-green-600">{step.tool}</span>
+                {step.output === '...' && (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin text-green-500/60" />
+                )}
               </div>
-            </Fragment>
-          ))}
-        </div>
-      )}
+              {step.output && step.output !== '...' && (
+                <div className="text-muted-foreground/55 mt-0.5 whitespace-pre-wrap break-words leading-relaxed">
+                  {step.output}
+                </div>
+              )}
+            </div>
+          </div>
+        </Fragment>
+      ))}
     </div>
   )
 }
@@ -160,30 +140,41 @@ interface MessageBubbleProps {
 function MessageBubble({ role, content, actions, steps, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
-  return (
-    <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      {!isUser && <StepsList steps={steps ?? []} isStreaming={isStreaming} />}
-
-      {/* 답변 생성 전 상태 표시 — content가 없을 때만 */}
-      {!isUser && isStreaming && !content && streamingStatus && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50 mb-0.5">
-          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-          <span>{streamingStatus}</span>
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed bg-muted text-muted-foreground">
+          <p className="whitespace-pre-wrap break-words">{content}</p>
         </div>
-      )}
+      </div>
+    )
+  }
 
-      {/* 내용이 있을 때만 버블 렌더링 */}
-      {(content || isUser) && (
-        <div
-          className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
-            isUser
-              ? 'bg-muted text-muted-foreground'
-              : 'bg-background border border-border/40 text-foreground'
-          }`}
-        >
-          {isUser ? (
-            <p className="whitespace-pre-wrap break-words">{content}</p>
-          ) : (
+  // assistant — AI 아이콘 + 내용
+  return (
+    <div className="flex gap-2 items-start">
+      {/* AI 아이콘 */}
+      <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center shrink-0 mt-0.5">
+        <Bot className="w-3.5 h-3.5 text-foreground/60" />
+      </div>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        {/* 추론/도구 단계 */}
+        {(steps?.length ?? 0) > 0 && (
+          <StepsList steps={steps ?? []} isStreaming={isStreaming} />
+        )}
+
+        {/* 답변 생성 전 상태 표시 */}
+        {isStreaming && !content && streamingStatus && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50">
+            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+            <span>{streamingStatus}</span>
+          </div>
+        )}
+
+        {/* 답변 버블 */}
+        {content && (
+          <div className="max-w-[95%] rounded-lg px-3 py-2 text-sm leading-relaxed bg-background border border-border/40 text-foreground">
             <div className="prose prose-sm max-w-none break-words
               [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5
               [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
@@ -192,20 +183,20 @@ function MessageBubble({ role, content, actions, steps, isStreaming, streamingSt
               [&_strong]:font-semibold [&_a]:text-primary [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:opacity-70">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* 액션 chip — 자동 실행되는 apply_query, open_tab은 표시하지 않음 */}
-      {actions && actions.filter(a => a.type !== 'apply_query' && a.type !== 'open_tab').length > 0 && (
-        <div className="flex flex-wrap gap-1 max-w-[90%]">
-          {actions
-            .filter(a => a.type !== 'apply_query' && a.type !== 'open_tab')
-            .map((action, i) => (
-              <ActionChip key={i} action={action} onApply={() => onAction(action)} />
-            ))}
-        </div>
-      )}
+        {/* 액션 chip */}
+        {actions && actions.filter(a => a.type !== 'apply_query' && a.type !== 'open_tab').length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {actions
+              .filter(a => a.type !== 'apply_query' && a.type !== 'open_tab')
+              .map((action, i) => (
+                <ActionChip key={i} action={action} onApply={() => onAction(action)} />
+              ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
