@@ -30,6 +30,44 @@ MAX_TOOL_ROUNDS = 6
 HISTORY_LIMIT = 6  # 대화 히스토리 최대 유지 턴 수
 
 
+# ── 공통 머지 유틸 ─────────────────────────────────────────────────────────────
+
+def _merge_actions(existing: list[ChatAction], incoming: list[ChatAction]) -> list[ChatAction]:
+    merged = list(existing)
+    seen = {json.dumps(a.model_dump(), sort_keys=True, ensure_ascii=False) for a in existing}
+    for action in incoming:
+        key = json.dumps(action.model_dump(), sort_keys=True, ensure_ascii=False)
+        if key not in seen:
+            merged.append(action)
+            seen.add(key)
+    return merged
+
+
+def _merge_tool_result(base: ToolResult, incoming: ToolResult | None) -> ToolResult:
+    if incoming is None:
+        return base
+    merged = base.model_copy(deep=True)
+    if incoming.graph is not None:
+        merged.graph = incoming.graph
+    if incoming.table is not None:
+        merged.table = incoming.table
+    if incoming.chart is not None:
+        merged.chart = incoming.chart
+    if incoming.cypher:
+        merged.cypher = incoming.cypher
+    if incoming.summary:
+        if merged.summary:
+            parts = [p.strip() for p in [merged.summary, incoming.summary] if p.strip()]
+            deduped: list[str] = []
+            for p in parts:
+                if p not in deduped:
+                    deduped.append(p)
+            merged.summary = "\n".join(deduped)
+        else:
+            merged.summary = incoming.summary
+    return merged
+
+
 # ── AgentState ─────────────────────────────────────────────────────────────────
 
 @dataclass
