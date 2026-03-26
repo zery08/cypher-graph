@@ -121,26 +121,28 @@ function ToolItem({ step, isStreaming }: { step: StepInfo; isStreaming: boolean 
   const inputPreview = step.input ? ` ${step.input.slice(0, 50)}${step.input.length > 50 ? '…' : ''}` : ''
 
   return (
-    <button
-      onClick={() => setOpen(o => !o)}
-      className="flex items-center gap-1 text-left hover:opacity-75 transition-opacity w-full"
-    >
-      <span className="font-semibold text-foreground/70">{step.tool}</span>
-      {inputPreview && !open && (
-        <span className="text-muted-foreground/50 font-normal truncate">{inputPreview}</span>
-      )}
-      {!isPending && (
-        <ChevronRight className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`} />
-      )}
-      {isPending && isStreaming && (
-        <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/40 ml-0.5" />
-      )}
+    <div className="flex-1 min-w-0">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-left hover:opacity-75 transition-opacity w-full"
+      >
+        <span className="font-semibold text-foreground/70">{step.tool}</span>
+        {inputPreview && !open && (
+          <span className="text-muted-foreground/50 font-normal truncate">{inputPreview}</span>
+        )}
+        {!isPending && (
+          <ChevronRight className={`w-3 h-3 shrink-0 text-muted-foreground/40 transition-transform ${open ? 'rotate-90' : ''}`} />
+        )}
+        {isPending && isStreaming && (
+          <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/40 ml-0.5" />
+        )}
+      </button>
       {open && step.output && step.output !== '...' && (
-        <div className="mt-1 text-muted-foreground/55 whitespace-pre-wrap break-words leading-relaxed w-full">
+        <div className="mt-1 text-muted-foreground/55 whitespace-pre-wrap break-words leading-relaxed">
           {step.output}
         </div>
       )}
-    </button>
+    </div>
   )
 }
 
