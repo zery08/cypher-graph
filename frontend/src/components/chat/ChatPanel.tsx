@@ -96,14 +96,19 @@ function TimelineRow({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex gap-2 items-start">
-      {/* 왼쪽: 불릿 + 연결선 */}
-      <div className="flex flex-col items-center shrink-0 w-2">
-        <div className="mt-[4px] shrink-0">{dot}</div>
-        {!isLast && <div className="w-px bg-border/40 flex-1 mt-1 min-h-[8px]" />}
+    <div className="flex gap-2.5 items-start">
+      {/* 왼쪽: 불릿 + 점선 */}
+      <div className="flex flex-col items-center shrink-0" style={{ width: 10 }}>
+        <div style={{ marginTop: 5 }}>{dot}</div>
+        {!isLast && (
+          <div
+            className="flex-1 mt-1"
+            style={{ width: 0, minHeight: 10, borderLeft: '1.5px dashed hsl(var(--border) / 0.5)' }}
+          />
+        )}
       </div>
       {/* 오른쪽: 내용 */}
-      <div className="flex-1 min-w-0 pb-1.5">{children}</div>
+      <div className="flex-1 min-w-0 pb-2">{children}</div>
     </div>
   )
 }
@@ -182,7 +187,7 @@ function StepsList({
           return (
             <TimelineRow
               key={`pre-${idx}`}
-              dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/40 shrink-0" />}
+              dot={<span className="block w-1.5 h-1.5 rounded-full bg-foreground/50" />}
               isLast={isLast}
             >
               <p className="text-muted-foreground/65 whitespace-pre-wrap break-words leading-relaxed">
@@ -196,7 +201,7 @@ function StepsList({
           return (
             <TimelineRow
               key={`thought-${idx}`}
-              dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/50 shrink-0" />}
+              dot={<span className="block w-2 h-2 rounded-full bg-foreground" />}
               isLast={isLast}
             >
               <ThoughtItem
@@ -210,7 +215,7 @@ function StepsList({
         return (
           <TimelineRow
             key={`tool-${idx}`}
-            dot={<span className="w-1.5 h-1.5 rounded-full bg-foreground/50 shrink-0" />}
+            dot={<span className="block w-2 h-2 rounded-full bg-green-500" />}
             isLast={isLast}
           >
             <ToolItem step={item.step} isStreaming={isStreaming} />
