@@ -51,7 +51,6 @@ function StepsList({
   steps: StepInfo[]
   isStreaming?: boolean
 }) {
-  // 스트리밍 중에는 펼침, 완료 후엔 기본 접힘
   const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
@@ -62,42 +61,36 @@ function StepsList({
 
   return (
     <div className="max-w-[90%] text-xs mb-1">
-      {/* 헤더 토글 */}
       <button
         onClick={() => setCollapsed(c => !c)}
-        className="flex items-center gap-1.5 text-muted-foreground/60 hover:text-muted-foreground transition-colors mb-1"
+        className="flex items-center gap-1.5 text-muted-foreground/70 hover:text-muted-foreground transition-colors mb-1"
       >
-        {collapsed
-          ? <ChevronRight className="w-3 h-3" />
-          : <ChevronDown className="w-3 h-3" />
-        }
+        {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         <span>추론 과정 · {steps.length}단계</span>
       </button>
 
       {!collapsed && (
-        <div className="flex flex-col gap-1.5 pl-1 border-l border-border/40">
+        <div className="flex flex-col gap-1.5 pl-1 border-l border-border/30">
           {steps.map((step, i) => (
             <Fragment key={i}>
-              {/* 이 tool 호출 직전 추론 */}
               {step.reasoning && (
-                <div className="text-amber-700/75 whitespace-pre-wrap break-words leading-relaxed pl-2 border-l-2 border-amber-300/50">
+                <div className="text-muted-foreground/80 whitespace-pre-wrap break-words leading-relaxed pl-2">
                   {step.reasoning}
                   {isStreaming && i === steps.length - 1 && step.output === '...' && (
-                    <span className="inline-block w-1 h-3 bg-amber-500/70 rounded-sm animate-pulse ml-0.5 align-middle" />
+                    <span className="inline-block w-1 h-3 bg-muted-foreground/30 rounded-sm animate-pulse ml-0.5 align-middle" />
                   )}
                 </div>
               )}
-              {/* tool 호출 결과 */}
-              <div className="bg-muted/30 rounded px-2 py-1.5 space-y-0.5">
-                <div className="font-medium text-muted-foreground flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+              <div className="pl-2 space-y-0.5">
+                <div className="text-muted-foreground/70 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-muted-foreground/50 shrink-0" />
                   {step.tool}
                   {step.output === '...' && (
-                    <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50" />
+                    <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/30" />
                   )}
                 </div>
                 {step.output && step.output !== '...' && (
-                  <div className="text-muted-foreground/70 whitespace-pre-wrap break-words">
+                  <div className="text-muted-foreground/70 whitespace-pre-wrap break-words pl-2.5">
                     {step.output}
                   </div>
                 )}
@@ -118,35 +111,48 @@ interface MessageBubbleProps {
   actions?: ChatAction[]
   steps?: StepInfo[]
   isStreaming?: boolean
+  streamingStatus?: string | null
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, actions, steps, isStreaming, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, actions, steps, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
       {!isUser && <StepsList steps={steps ?? []} isStreaming={isStreaming} />}
-      <div
-        className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
-          isUser
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted text-foreground'
-        }`}
-      >
-        {isUser ? (
-          <p className="whitespace-pre-wrap break-words">{content}</p>
-        ) : (
-          <div className="prose prose-sm prose-invert max-w-none break-words
-            [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5
-            [&_code]:bg-background/60 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
-            [&_pre]:bg-background/60 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:text-xs
-            [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold
-            [&_strong]:font-semibold [&_a]:text-primary [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:opacity-70">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          </div>
-        )}
-      </div>
+
+      {/* 답변 생성 전 상태 표시 — content가 없을 때만 */}
+      {!isUser && isStreaming && !content && streamingStatus && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground/50 mb-0.5">
+          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+          <span>{streamingStatus}</span>
+        </div>
+      )}
+
+      {/* 내용이 있을 때만 버블 렌더링 */}
+      {(content || isUser) && (
+        <div
+          className={`max-w-[90%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
+            isUser
+              ? 'bg-muted text-muted-foreground'
+              : 'bg-background border border-border/40 text-foreground'
+          }`}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap break-words">{content}</p>
+          ) : (
+            <div className="prose prose-sm max-w-none break-words
+              [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5
+              [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
+              [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:text-xs
+              [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold
+              [&_strong]:font-semibold [&_a]:text-primary [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:opacity-70">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 액션 chip — 자동 실행되는 apply_query, open_tab은 표시하지 않음 */}
       {actions && actions.filter(a => a.type !== 'apply_query' && a.type !== 'open_tab').length > 0 && (
@@ -281,7 +287,7 @@ export function ChatPanel() {
           liveReasoning += event.content
           updateMessage(assistantId, { reasoning: liveReasoning })
         } else if (event.type === 'token') {
-          setStreamingStatus('답변 생성 중...')
+          setStreamingStatus(null)  // 답변 시작하면 상태 표시 제거
           appendToken(assistantId, event.content)
         } else if (event.type === 'step_start') {
           setStreamingStatus(`도구 호출 중: ${event.tool}`)
@@ -414,14 +420,6 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* 스트리밍 상태 배너 */}
-      {streamingStatus && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/5 border-b border-amber-500/10 shrink-0">
-          <Loader2 className="w-3 h-3 animate-spin text-amber-600/70 shrink-0" />
-          <span className="text-xs text-amber-700/70">{streamingStatus}</span>
-        </div>
-      )}
-
       {/* 메시지 목록 */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-3 p-3">
@@ -454,6 +452,7 @@ export function ChatPanel() {
               actions={msg.actions}
               steps={msg.steps}
               isStreaming={msg.id === streamingMessageId}
+              streamingStatus={msg.id === streamingMessageId ? streamingStatus : null}
               onAction={handleAction}
             />
           ))}
