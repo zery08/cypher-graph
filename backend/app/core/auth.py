@@ -22,17 +22,20 @@ oauth.register(
 
 # ── 현재 사용자 의존성 ──────────────────────────────────────────────────────────
 
+ANONYMOUS_USER = {"id": "unknown", "name": "unknown", "email": "unknown"}
+
+
 async def get_current_user(request: Request) -> dict:
     """
     세션 쿠키에서 로그인 사용자 정보를 반환한다.
-    인증되지 않은 경우 401을 반환한다.
+    Keycloak 미설정 또는 인증 실패 시 anonymous 사용자를 반환한다.
     """
     user = request.session.get("user")
     if not user:
-        raise HTTPException(status_code=401, detail="인증이 필요합니다")
+        return ANONYMOUS_USER
     return user
 
 
 async def get_current_user_optional(request: Request) -> dict | None:
-    """인증 여부에 관계없이 사용자 정보를 반환한다 (없으면 None)."""
-    return request.session.get("user")
+    """인증 여부에 관계없이 사용자 정보를 반환한다 (없으면 anonymous)."""
+    return request.session.get("user") or ANONYMOUS_USER

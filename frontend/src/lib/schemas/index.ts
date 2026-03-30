@@ -63,6 +63,7 @@ export const StepInfoSchema = z.object({
   input: z.string(),
   output: z.string(),
   reasoning: z.string().nullable().optional(),
+  durationMs: z.number().optional(),   // 이 step 직전 reasoning 실제 소요 시간 (프론트 측정)
 })
 
 export const ChatResponseSchema = z.object({

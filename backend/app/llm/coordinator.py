@@ -4,7 +4,6 @@ native tool calling 을 먼저 시도하고, 모델이 지원하지 않으면
 텍스트 기반 tool calling (JSON 파싱) 으로 자동 fallback 한다.
 GLM 4.7 / LFM thinking 모드 등 reasoning_content 를 별도 필드로 분리한다.
 """
-import asyncio
 import json
 import logging
 import re
@@ -251,23 +250,6 @@ def _run_tool(tool_def: ToolDef | None, fn_name: str, fn_args_str: str) -> str:
         return json.dumps({"error": str(e)})
 
 
-async def _run_tool_batch(
-    tool_calls: list[tuple[ToolDef | None, str, str | dict]],
-) -> list[tuple[str, ToolResult | None, list[ChatAction], str]]:
-    async def _execute_one(
-        tool_def: ToolDef | None,
-        fn_name: str,
-        fn_args: str | dict,
-    ) -> tuple[str, ToolResult | None, list[ChatAction], str]:
-        output = await asyncio.to_thread(_run_tool, tool_def, fn_name, fn_args)
-        tool_result, actions, summary = _parse_tool_result(fn_name, output)
-        return output, tool_result, actions, summary
-
-    return await asyncio.gather(
-        *[_execute_one(tool_def, fn_name, fn_args) for tool_def, fn_name, fn_args in tool_calls]
-    )
-
-
 def _merge_actions(existing: list[ChatAction], incoming: list[ChatAction]) -> list[ChatAction]:
     merged = list(existing)
     seen = {json.dumps(action.model_dump(), sort_keys=True, ensure_ascii=False) for action in existing}
@@ -320,7 +302,6 @@ async def _stream_native(
     steps: list[StepInfo] = []
     all_actions: list[ChatAction] = []
     final_tool_result = ToolResult()
-    accumulated_reasoning = ""
 
     for _ in range(MAX_TOOL_ROUNDS):
         stream = await client.chat.completions.create(
@@ -391,13 +372,11 @@ async def _stream_native(
         full_content = "".join(content_parts)
 
         # reasoning_content 필드 방식 (GLM 등) + <think> 태그 방식 (QwQ, DeepSeek-R1) 동시 지원
+        # full_reasoning = 이번 round의 reasoning만 (누적 X)
         tag_reasoning, clean_content = _split_think_content(full_content)
         full_reasoning = ("".join(reasoning_parts) + "\n" + tag_reasoning).strip()
         if tag_reasoning:
             full_content = clean_content
-            accumulated_reasoning = ("".join(
-                [accumulated_reasoning] + [tag_reasoning]
-            )).strip()
 
         step_reasoning = full_reasoning or None
 
@@ -418,12 +397,13 @@ async def _stream_native(
             yield json.dumps({"type": "reasoning_token", "content": tag_reasoning}, ensure_ascii=False)
 
         if not tool_calls_acc:
+            # 마지막 round(tool 없음)의 reasoning = 이번 round만의 reasoning
             yield json.dumps({
                 "type": "done",
                 "actions": [a.model_dump() for a in all_actions],
                 "tool_results": final_tool_result.model_dump(),
                 "steps": [s.model_dump() for s in steps],
-                "reasoning": accumulated_reasoning.strip() or None,
+                "reasoning": step_reasoning,
             }, ensure_ascii=False)
             return
 
@@ -431,28 +411,24 @@ async def _stream_native(
         messages.append({"role": "assistant", "content": full_content or None,
                          "tool_calls": tool_calls_list})
 
-        batch_inputs: list[tuple[ToolDef | None, str, str]] = []
-        for tc in tool_calls_list:
+        # 이번 round의 reasoning은 첫 번째 tool에만 붙인다.
+        # 같은 round에 tool이 여러 개면 두 번째부터는 reasoning=None
+        for tc_idx, tc in enumerate(tool_calls_list):
             fn_name = tc["function"]["name"]
             fn_args_str = tc["function"]["arguments"]
             tool_def = tools_by_name.get(fn_name)
+            round_reasoning = step_reasoning if tc_idx == 0 else None
 
             yield json.dumps({
                 "type": "step_start",
                 "tool": tool_def.label if tool_def else fn_name,
                 "tool_key": fn_name,
                 "input": fn_args_str[:2000],
-                "reasoning": step_reasoning,
+                "reasoning": round_reasoning,
             }, ensure_ascii=False)
 
-            batch_inputs.append((tool_def, fn_name, fn_args_str))
-
-        batch_results = await _run_tool_batch(batch_inputs)
-
-        for tc, (output, tool_result, actions, summary) in zip(tool_calls_list, batch_results):
-            fn_name = tc["function"]["name"]
-            fn_args_str = tc["function"]["arguments"]
-            tool_def = tools_by_name.get(fn_name)
+            output = _run_tool(tool_def, fn_name, fn_args_str)
+            tool_result, actions, summary = _parse_tool_result(fn_name, output)
             if tool_result:
                 final_tool_result = _merge_tool_result(final_tool_result, tool_result)
             all_actions = _merge_actions(all_actions, actions)
@@ -462,13 +438,16 @@ async def _stream_native(
                 tool_key=fn_name,
                 input=fn_args_str[:2000],
                 output=summary,
-                reasoning=step_reasoning,
+                reasoning=round_reasoning,
             ))
 
             yield json.dumps({"type": "step_end", "tool_key": fn_name,
                               "output": summary}, ensure_ascii=False)
 
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
+
+        # 다음 round를 위해 step_reasoning 초기화
+        step_reasoning = None
 
     yield json.dumps({"type": "error", "content": "최대 tool 호출 횟수를 초과했습니다."}, ensure_ascii=False)
 
@@ -500,7 +479,7 @@ async def _stream_text(
             messages=messages,
             stream=True,
             max_tokens=settings.coordinator_max_tokens,
-            extra_body=_thinking_extra_body() or None,
+            #extra_body=_thinking_extra_body() or None,
         )
 
         content_parts: list[str] = []
@@ -542,7 +521,6 @@ async def _stream_text(
         # 대화 히스토리에 tool call + result 추가
         messages.append({"role": "assistant", "content": full_content})
         tool_feedback_blocks: list[str] = []
-        batch_inputs: list[tuple[ToolDef | None, str, dict]] = []
 
         for tc_data in tool_calls:
             fn_name = tc_data.get("name", "")
@@ -558,15 +536,8 @@ async def _stream_text(
                 "reasoning": step_reasoning,
             }, ensure_ascii=False)
 
-            batch_inputs.append((tool_def, fn_name, fn_args))
-
-        batch_results = await _run_tool_batch(batch_inputs)
-
-        for tc_data, (output, tool_result, actions, summary) in zip(tool_calls, batch_results):
-            fn_name = tc_data.get("name", "")
-            fn_args = tc_data.get("arguments", {})
-            fn_args_str = json.dumps(fn_args, ensure_ascii=False)
-            tool_def = tools_by_name.get(fn_name)
+            output = _run_tool(tool_def, fn_name, fn_args)
+            tool_result, actions, summary = _parse_tool_result(fn_name, output)
             if tool_result:
                 final_tool_result = _merge_tool_result(final_tool_result, tool_result)
             all_actions = _merge_actions(all_actions, actions)

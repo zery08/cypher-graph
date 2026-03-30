@@ -17,14 +17,22 @@ _graph_instance: Neo4jGraph | None = None
 _driver_instance = None
 
 
+def _preview_text(value: Any, limit: int = 300) -> str:
+    text = value if isinstance(value, str) else repr(value)
+    text = text.replace("\n", "\\n")
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
 def get_driver():
     """neo4j 드라이버 싱글톤 반환 (직접 쿼리 실행용)"""
     global _driver_instance
     if _driver_instance is None:
+        logger.info("Neo4j 드라이버 초기화 중...")
         _driver_instance = GraphDatabase.driver(
             settings.neo4j_uri,
             auth=(settings.neo4j_username, settings.neo4j_password),
         )
+        logger.info("Neo4j 드라이버 초기화 완료")
     return _driver_instance
 
 
@@ -87,20 +95,34 @@ def execute_query(cypher: str, params: dict[str, Any] = {}) -> tuple[list[dict],
     """
     start = time.monotonic()
     driver = get_driver()
+    logger.info(
+        f"[neo4j] 쿼리 실행 시작 cypher={_preview_text(cypher, 800)} "
+        f"params={_preview_text(params, 500)}"
+    )
 
     raw_records: list[dict] = []
     node_edge_records: list[dict] = []  # 파싱용 원본 객체 보존
 
-    with driver.session() as session:
-        result = session.run(cypher, params)
-        for record in result:
-            # 파싱용: Node/Relationship 객체 그대로 보존
-            node_edge_records.append(dict(record))
-            # raw용: JSON 직렬화 가능하게 변환
-            raw_records.append({k: _serialize_value(v) for k, v in record.items()})
+    try:
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            for record in result:
+                # 파싱용: Node/Relationship 객체 그대로 보존
+                node_edge_records.append(dict(record))
+                # raw용: JSON 직렬화 가능하게 변환
+                raw_records.append({k: _serialize_value(v) for k, v in record.items()})
+    except Exception as e:
+        logger.error(
+            f"[neo4j] 쿼리 실행 실패 cypher={_preview_text(cypher, 800)} error={e}",
+            exc_info=True,
+        )
+        raise
 
     elapsed_ms = (time.monotonic() - start) * 1000
-    logger.debug(f"쿼리 실행 완료 ({elapsed_ms:.1f}ms): {cypher[:80]}")
+    logger.info(
+        f"[neo4j] 쿼리 실행 완료 rows={len(raw_records)} elapsed_ms={elapsed_ms:.1f} "
+        f"cypher={_preview_text(cypher, 800)}"
+    )
 
     # parse_graph_result를 위해 node_edge_records를 같이 반환
     _last_node_edge_records.clear()
@@ -124,6 +146,10 @@ def parse_graph_result(raw_results: list[dict]) -> GraphResult:
 
     # execute_query가 저장해둔 원본 객체 레코드 사용
     records_to_parse = _last_node_edge_records if _last_node_edge_records else raw_results
+    logger.info(
+        f"[neo4j] 그래프 파싱 시작 raw_rows={len(raw_results)} "
+        f"records_to_parse={len(records_to_parse)}"
+    )
 
     for record in records_to_parse:
         for value in record.values():
@@ -149,11 +175,15 @@ def parse_graph_result(raw_results: list[dict]) -> GraphResult:
                         )
                     )
 
-    return GraphResult(
+    graph_result = GraphResult(
         nodes=list(nodes.values()),
         edges=edges,
         raw=raw_results,
     )
+    logger.info(
+        f"[neo4j] 그래프 파싱 완료 nodes={len(graph_result.nodes)} edges={len(graph_result.edges)}"
+    )
+    return graph_result
 
 
 def get_schema_info() -> dict[str, Any]:

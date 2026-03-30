@@ -64,6 +64,17 @@ async def startup_event():
     try:
         await init_db()
         logger.info("PostgreSQL 테이블 초기화 완료")
+        # anonymous 사용자 upsert (Keycloak 미사용 시 FK 오류 방지)
+        from app.core.database import AsyncSessionLocal
+        from app.models.user import User
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        async with AsyncSessionLocal() as session:
+            stmt = pg_insert(User).values(
+                id="unknown", username="unknown", email="unknown"
+            ).on_conflict_do_nothing(index_elements=["id"])
+            await session.execute(stmt)
+            await session.commit()
+        logger.info("anonymous 사용자 준비 완료")
     except Exception as e:
         logger.warning(f"PostgreSQL 연결 실패 — 대화 기록 기능 비활성화: {e}")
 
