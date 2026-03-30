@@ -9,8 +9,10 @@ deepagents가 agent loop(tool 선택·실행·반복)를 담당한다.
 """
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Optional, Any
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
@@ -54,6 +56,7 @@ from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
 from app.llm.tools import load_all_tools, ToolDef
 from app.llm.coordinator_v2 import (
+    _fmt_messages,
     _schema_snippet,
     _parse_tool_result,
     _split_think_content,
@@ -67,6 +70,60 @@ _TYPE_MAP: dict[str, type] = {
     "string": str, "number": float, "integer": int,
     "boolean": bool, "array": list, "object": dict,
 }
+_DEEPAGENT_DIR = Path(__file__).with_name("deepagents")
+
+
+def _preview_text(value: Any, limit: int = 300) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            value = repr(value)
+    value = value.replace("\n", "\\n")
+    return value if len(value) <= limit else f"{value[:limit]}..."
+
+
+def _existing_deepagent_paths(*paths: Path) -> list[str]:
+    resolved: list[str] = []
+    for path in paths:
+        if path.exists():
+            resolved.append(str(path))
+        else:
+            logger.warning(f"deepagents asset 누락: {path}")
+    return resolved
+
+
+def _build_deep_agent(tool_defs: list[ToolDef]):
+    """현재 프로젝트용 deep agent를 구성한다."""
+    langchain_tools = [_to_langchain_tool(t) for t in tool_defs]
+    memory_paths = _existing_deepagent_paths(_DEEPAGENT_DIR / "AGENTS.md") or None
+    skill_paths = _existing_deepagent_paths(_DEEPAGENT_DIR / "skills") or None
+
+    logger.info(
+        f"[coordinator_v3] deepagent 구성 tools={[t.name for t in tool_defs]} "
+        f"memory={memory_paths or []} skills={skill_paths or []}"
+    )
+
+    return create_deep_agent(
+        model=ReasoningChatOpenAI(
+            model=settings.coordinator_model,
+            api_key=settings.coordinator_api_key,
+            base_url=settings.coordinator_base_url,
+            max_tokens=settings.coordinator_max_tokens,
+            temperature=0.1,
+        ),
+        tools=langchain_tools,
+        system_prompt=COORDINATOR_SYSTEM_PROMPT.format(
+            current_date=datetime.now().strftime("%Y-%m-%d"),
+            schema=_schema_snippet(),
+        ),
+        memory=memory_paths,
+        skills=skill_paths,
+        checkpointer=False,
+        name="semiconductor-data-agent",
+    )
 
 
 # ── ToolDef → LangChain StructuredTool ────────────────────────────────────────
@@ -86,7 +143,27 @@ def _to_langchain_tool(tool_def: ToolDef) -> StructuredTool:
     args_model = create_model(f"{tool_def.name}_Args", **fields)
 
     def _run(**kwargs: Any) -> str:
-        return tool_def.run(kwargs)
+        started_at = time.monotonic()
+        logger.info(
+            f"[tool_wrapper] 시작 tool={tool_def.name} label={tool_def.label} "
+            f"args={_preview_text(kwargs, 800)}"
+        )
+        try:
+            result = tool_def.run(kwargs)
+            elapsed_ms = (time.monotonic() - started_at) * 1000
+            logger.info(
+                f"[tool_wrapper] 완료 tool={tool_def.name} elapsed_ms={elapsed_ms:.1f} "
+                f"output_len={len(result)} output={_preview_text(result, 800)}"
+            )
+            return result
+        except Exception as e:
+            elapsed_ms = (time.monotonic() - started_at) * 1000
+            logger.error(
+                f"[tool_wrapper] 실패 tool={tool_def.name} elapsed_ms={elapsed_ms:.1f} "
+                f"args={_preview_text(kwargs, 800)} error={e}",
+                exc_info=True,
+            )
+            raise
 
     return StructuredTool.from_function(
         func=_run,
@@ -110,24 +187,11 @@ async def stream_coordinator(
     """
     tool_defs = load_all_tools()
     tools_by_name = {t.name: t for t in tool_defs}
+    request_id = uuid.uuid4().hex[:8]
+    thread_id = str(uuid.uuid4())
+    stream_started_at = time.monotonic()
 
-    llm = ReasoningChatOpenAI(
-        model=settings.coordinator_model,
-        api_key=settings.coordinator_api_key,
-        base_url=settings.coordinator_base_url,
-        max_tokens=settings.coordinator_max_tokens,
-        temperature=0.1,
-    )
-
-    agent = create_deep_agent(
-        model=llm,
-        tools=[_to_langchain_tool(t) for t in tool_defs],
-        system_prompt=COORDINATOR_SYSTEM_PROMPT.format(
-            current_date=datetime.now().strftime("%Y-%m-%d"),
-            schema=_schema_snippet(),
-        ),
-        checkpointer=False,
-    )
+    agent = _build_deep_agent(tool_defs)
 
     # 입력 메시지 구성
     msgs: list[dict] = [{"role": m["role"], "content": m["content"]} for m in history[-HISTORY_LIMIT:]]
@@ -141,6 +205,8 @@ async def stream_coordinator(
 
     # 누적 상태
     accumulated_reasoning = ""
+    current_round_reasoning = ""
+    current_round_reasoning_started_at: float | None = None
     accumulated_actions: list[ChatAction] = []
     accumulated_tool_result = ToolResult()
     steps: list[StepInfo] = []
@@ -148,11 +214,30 @@ async def stream_coordinator(
     # tool_call_chunk 첫 번째에만 id가 오고 이후엔 None이므로 index를 primary key로 사용
     pending_calls: dict[int, dict] = {}
     emitted_starts: set[int] = set()
+    emitted_token_chars = 0
+    emitted_reasoning_chars = 0
+    tool_message_count = 0
+
+    logger.info(
+        f"[coordinator_v3:{request_id}] stream 시작 "
+        f"model={settings.coordinator_model} thread_id={thread_id} "
+        f"history={len(history[-HISTORY_LIMIT:])} context={_preview_text(context, 500)}\n"
+        f"{_fmt_messages(msgs)}"
+    )
 
     try:
+        def _append_reasoning(text: str) -> None:
+            nonlocal accumulated_reasoning, current_round_reasoning, current_round_reasoning_started_at
+            if not text:
+                return
+            accumulated_reasoning += text
+            current_round_reasoning += text
+            if current_round_reasoning_started_at is None:
+                current_round_reasoning_started_at = time.monotonic()
+
         async for chunk, metadata in agent.astream(
             {"messages": msgs},
-            config={"configurable": {"thread_id": str(uuid.uuid4())}},
+            config={"configurable": {"thread_id": thread_id}},
             stream_mode="messages",
         ):
             node = metadata.get("langgraph_node", "")
@@ -162,7 +247,12 @@ async def stream_coordinator(
                 ak = chunk.additional_kwargs or {}
                 rc = ak.get("reasoning") or ak.get("reasoning_content") or ak.get("thinking") or ""
                 if rc:
-                    accumulated_reasoning += rc
+                    _append_reasoning(rc)
+                    emitted_reasoning_chars += len(rc)
+                    logger.debug(
+                        f"[coordinator_v3:{request_id}] reasoning_chunk source=additional_kwargs "
+                        f"node={node} len={len(rc)} preview={_preview_text(rc, 500)}"
+                    )
                     yield json.dumps({"type": "reasoning_token", "content": rc}, ensure_ascii=False)
 
                 # 2) 텍스트 토큰 — model 노드의 최종 응답만 yield
@@ -179,17 +269,37 @@ async def stream_coordinator(
                             if isinstance(b, dict) and b.get("type") == "thinking"
                         )
                         if thinking:
-                            accumulated_reasoning += thinking
+                            _append_reasoning(thinking)
+                            emitted_reasoning_chars += len(thinking)
+                            logger.debug(
+                                f"[coordinator_v3:{request_id}] reasoning_chunk source=thinking_block "
+                                f"node={node} len={len(thinking)} preview={_preview_text(thinking, 500)}"
+                            )
                             yield json.dumps({"type": "reasoning_token", "content": thinking}, ensure_ascii=False)
 
                     if raw:
                         tag_reasoning, clean = _split_think_content(raw)
                         if tag_reasoning:
-                            accumulated_reasoning += tag_reasoning
+                            _append_reasoning(tag_reasoning)
+                            emitted_reasoning_chars += len(tag_reasoning)
+                            logger.debug(
+                                f"[coordinator_v3:{request_id}] reasoning_chunk source=think_tag "
+                                f"node={node} len={len(tag_reasoning)} preview={_preview_text(tag_reasoning, 500)}"
+                            )
                             yield json.dumps({"type": "reasoning_token", "content": tag_reasoning}, ensure_ascii=False)
                         # tool call 대기 중이 아닐 때만 토큰 전송
                         if clean and not pending_calls:
+                            emitted_token_chars += len(clean)
+                            logger.debug(
+                                f"[coordinator_v3:{request_id}] text_chunk node={node} len={len(clean)} "
+                                f"preview={_preview_text(clean, 500)}"
+                            )
                             yield json.dumps({"type": "token", "content": clean}, ensure_ascii=False)
+                        elif clean:
+                            logger.debug(
+                                f"[coordinator_v3:{request_id}] text_chunk 보류 node={node} len={len(clean)} "
+                                f"pending_calls={len(pending_calls)} preview={_preview_text(clean, 500)}"
+                            )
 
                 # 3) tool call 청크 누적
                 #    첫 chunk: index=N, id="call_xxx", name="tool_name", args=""
@@ -197,6 +307,11 @@ async def stream_coordinator(
                 #    → index를 key로 사용해 하나의 entry에 합산
                 for tc in chunk.tool_call_chunks or []:
                     idx = tc.get("index") or 0
+                    logger.debug(
+                        f"[coordinator_v3:{request_id}] tool_call_chunk node={node} idx={idx} "
+                        f"id={tc.get('id')} name_part={_preview_text(tc.get('name') or '', 120)} "
+                        f"args_part={_preview_text(tc.get('args') or '', 300)}"
+                    )
                     if idx not in pending_calls:
                         pending_calls[idx] = {"id": None, "name": "", "args_parts": []}
                     if tc.get("id"):
@@ -210,19 +325,46 @@ async def stream_coordinator(
                 for idx, tc in pending_calls.items():
                     if tc["name"] and idx not in emitted_starts:
                         td = tools_by_name.get(tc["name"])
+                        step_reasoning = current_round_reasoning.strip() or None
+                        step_reasoning_duration_ms = None
+                        if current_round_reasoning_started_at is not None:
+                            step_reasoning_duration_ms = max(
+                                1,
+                                int((time.monotonic() - current_round_reasoning_started_at) * 1000),
+                            )
+                        tc["reasoning"] = step_reasoning
+                        tc["reasoning_duration_ms"] = step_reasoning_duration_ms
                         emitted_starts.add(idx)
+                        logger.info(
+                            f"[coordinator_v3:{request_id}] step_start tool={tc['name']} "
+                            f"input={_preview_text(''.join(tc['args_parts']), 800)} "
+                            f"reasoning_len={len(step_reasoning or '')} "
+                            f"reasoning_ms={step_reasoning_duration_ms}"
+                        )
                         yield json.dumps({
                             "type": "step_start",
                             "tool": td.label if td else tc["name"],
                             "tool_key": tc["name"],
                             "input": "".join(tc["args_parts"])[:2000],
-                            "reasoning": accumulated_reasoning.strip() or None,
+                            "reasoning": step_reasoning,
+                            "reasoning_duration_ms": step_reasoning_duration_ms,
                         }, ensure_ascii=False)
+                if not chunk.additional_kwargs and not (chunk.tool_call_chunks or []) and node != "model":
+                    logger.debug(
+                        f"[coordinator_v3:{request_id}] ai_chunk 수신 node={node} "
+                        f"content={_preview_text(chunk.content, 300)}"
+                    )
 
             elif isinstance(chunk, ToolMessage):
                 fn_name = chunk.name or ""
                 output = chunk.content if isinstance(chunk.content, str) else json.dumps(chunk.content)
                 td = tools_by_name.get(fn_name)
+                tool_message_count += 1
+                logger.debug(
+                    f"[coordinator_v3:{request_id}] tool_message #{tool_message_count} "
+                    f"tool={fn_name} call_id={chunk.tool_call_id} output_len={len(output)} "
+                    f"output={_preview_text(output, 800)}"
+                )
 
                 tool_result, actions, summary = _parse_tool_result(fn_name, output)
 
@@ -248,29 +390,66 @@ async def stream_coordinator(
                 call_id = chunk.tool_call_id or ""
                 key_to_remove = next((k for k, v in pending_calls.items() if v.get("id") == call_id), None)
                 args_str = ""
+                step_reasoning = None
                 if key_to_remove is not None:
-                    args_str = "".join(pending_calls.pop(key_to_remove)["args_parts"])
+                    call_info = pending_calls.pop(key_to_remove)
+                    args_str = "".join(call_info["args_parts"])
+                    step_reasoning = call_info.get("reasoning")
+                    if not pending_calls:
+                        emitted_starts.clear()
+                        current_round_reasoning = ""
+                        current_round_reasoning_started_at = None
 
                 steps.append(StepInfo(
                     tool=td.label if td else fn_name,
                     tool_key=fn_name,
                     input=args_str[:2000],
                     output=summary,
-                    reasoning=None,
+                    reasoning=step_reasoning,
                 ))
+                logger.info(
+                    f"[coordinator_v3:{request_id}] step_end tool={fn_name} "
+                    f"summary={_preview_text(summary, 500)} actions={len(actions)} "
+                    f"tool_result={'yes' if tool_result else 'no'}"
+                )
                 yield json.dumps({"type": "step_end", "tool_key": fn_name, "output": summary}, ensure_ascii=False)
+            else:
+                logger.info(
+                    f"[coordinator_v3:{request_id}] 알 수 없는 chunk type={type(chunk).__name__} "
+                    f"node={node}"
+                )
 
+        final_reasoning = current_round_reasoning.strip() or None
+        final_reasoning_duration_ms = None
+        if current_round_reasoning_started_at is not None:
+            final_reasoning_duration_ms = max(
+                1,
+                int((time.monotonic() - current_round_reasoning_started_at) * 1000),
+            )
+        total_elapsed_ms = (time.monotonic() - stream_started_at) * 1000
+        logger.info(
+            f"[coordinator_v3:{request_id}] done steps={len(steps)} actions={len(accumulated_actions)} "
+            f"token_chars={emitted_token_chars} reasoning_chars={emitted_reasoning_chars} "
+            f"final_reasoning_len={len(final_reasoning or '')} elapsed_ms={total_elapsed_ms:.1f}"
+        )
         yield json.dumps({
             "type": "done",
             "actions": [a.model_dump() for a in accumulated_actions],
             "tool_results": accumulated_tool_result.model_dump(),
             "steps": [s.model_dump() for s in steps],
-            "reasoning": accumulated_reasoning.strip() or None,
+            "reasoning": final_reasoning,
+            "reasoning_duration_ms": final_reasoning_duration_ms,
         }, ensure_ascii=False)
 
     except Exception as e:
         logger.error(f"stream_coordinator(v3) 오류: {e}", exc_info=True)
         yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+    finally:
+        total_elapsed_ms = (time.monotonic() - stream_started_at) * 1000
+        logger.info(
+            f"[coordinator_v3:{request_id}] stream 종료 elapsed_ms={total_elapsed_ms:.1f} "
+            f"steps={len(steps)} tool_messages={tool_message_count}"
+        )
 
 
 async def run_coordinator(
@@ -279,11 +458,16 @@ async def run_coordinator(
     context: dict = {},
 ) -> ChatResponse:
     """비스트리밍 실행."""
+    started_at = time.monotonic()
+    logger.info(
+        f"[coordinator_v3.run] 시작 history={len(history)} context={_preview_text(context, 500)} "
+        f"message={_preview_text(message, 500)}"
+    )
     tokens: list[str] = []
-    reasoning_parts: list[str] = []
     all_actions: list[ChatAction] = []
     tool_result = ToolResult()
     steps: list[StepInfo] = []
+    final_reasoning: str | None = None
 
     try:
         async for raw in stream_coordinator(message, history, context):
@@ -291,24 +475,34 @@ async def run_coordinator(
             t = event.get("type")
             if t == "token":
                 tokens.append(event["content"])
-            elif t == "reasoning_token":
-                reasoning_parts.append(event["content"])
             elif t == "done":
                 all_actions = [ChatAction(**a) for a in event.get("actions", [])]
                 tr = event.get("tool_results", {})
                 tool_result = ToolResult(**tr) if tr else ToolResult()
                 steps = [StepInfo(**s) for s in event.get("steps", [])]
+                final_reasoning = event.get("reasoning")
+                logger.info(
+                    f"[coordinator_v3.run] done message_len={sum(len(t) for t in tokens)} "
+                    f"steps={len(steps)} actions={len(all_actions)} "
+                    f"final_reasoning_len={len(final_reasoning or '')}"
+                )
                 break
             elif t == "error":
+                logger.warning(
+                    f"[coordinator_v3.run] error event={_preview_text(event.get('content', ''), 500)}"
+                )
                 return ChatResponse(message=f"오류: {event.get('content', '')}")
     except Exception as e:
         logger.error(f"run_coordinator(v3) 실패: {e}", exc_info=True)
         return ChatResponse(message=f"처리 중 오류가 발생했습니다: {str(e)}")
+    finally:
+        elapsed_ms = (time.monotonic() - started_at) * 1000
+        logger.info(f"[coordinator_v3.run] 종료 elapsed_ms={elapsed_ms:.1f}")
 
     return ChatResponse(
         message="".join(tokens) or "처리가 완료되었습니다.",
         actions=all_actions,
         tool_results=tool_result,
         steps=steps,
-        reasoning="".join(reasoning_parts).strip() or None,
+        reasoning=final_reasoning,
     )
