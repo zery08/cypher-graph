@@ -9,6 +9,7 @@ deepagents가 agent loop(tool 선택·실행·반복)를 담당한다.
 """
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime
@@ -55,14 +56,110 @@ class ReasoningChatOpenAI(ChatOpenAI):
 from app.core.config import settings
 from app.llm.prompts import COORDINATOR_SYSTEM_PROMPT
 from app.llm.tools import load_all_tools, ToolDef
-from app.llm.coordinator_v2 import (
-    _fmt_messages,
-    _schema_snippet,
-    _parse_tool_result,
-    _split_think_content,
-    HISTORY_LIMIT,
-)
 from app.schemas.chat import ChatResponse, ChatAction, ToolResult, StepInfo
+
+HISTORY_LIMIT = 6
+
+# ── 스키마 스니펫 ──────────────────────────────────────────────────────────────
+
+def _schema_snippet() -> str:
+    try:
+        from app.services.neo4j_service import get_schema_info
+        schema = get_schema_info()
+        lines = ["## Neo4j 스키마"]
+        for label in schema.get("node_labels", []):
+            props = schema.get("properties", {}).get(label, [])
+            lines.append(f"- 노드 {label}: {', '.join(props)}")
+        for rel in schema.get("relationship_types", []):
+            lines.append(f"- 관계 {rel}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"스키마 주입 실패: {e}")
+        return ""
+
+
+# ── 로깅 헬퍼 ─────────────────────────────────────────────────────────────────
+
+def _fmt_messages(msgs: list[dict]) -> str:
+    lines = []
+    for m in msgs:
+        role = m.get("role", "").upper()
+        content = str(m.get("content") or "")[:500]
+        lines.append(f"  [{role}] {content}")
+    return "\n".join(lines)
+
+
+# ── reasoning <think> 태그 분리 ───────────────────────────────────────────────
+
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _split_think_content(text: str) -> tuple[str, str]:
+    reasoning_parts = _THINK_TAG_RE.findall(text)
+    clean = _THINK_TAG_RE.sub("", text)
+    return "\n".join(reasoning_parts).strip(), clean
+
+
+# ── tool 결과 파싱 ─────────────────────────────────────────────────────────────
+
+def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, list[ChatAction], str]:
+    actions: list[ChatAction] = []
+    summary = output[:2000]
+    try:
+        data = json.loads(output)
+        if "error" in data:
+            return None, [], f"오류: {data['error']}"
+
+        if tool_name == "graph_cypher_qa_tool":
+            result = ToolResult(
+                cypher=data.get("cypher", ""),
+                graph={
+                    "nodes": data.get("nodes", []),
+                    "edges": data.get("edges", []),
+                    "raw": data.get("result", data.get("raw", [])),
+                },
+                table=data.get("result", data.get("raw", [])),
+                summary=data.get("answer", ""),
+            )
+            row_count = data.get("row_count", "?")
+            cypher = data.get("cypher", "")
+            summary = f"{row_count}건 반환"
+            if data.get("empty_result"):
+                summary = "조회 결과 0건"
+            if cypher:
+                summary += f"\n```cypher\n{cypher}\n```"
+                actions.append(ChatAction(type="apply_query", query=cypher))
+            if data.get("followup_hint"):
+                summary += f"\n후속 제안: {data['followup_hint']}"
+            tab = "graph" if data.get("nodes") else "table"
+            actions.append(ChatAction(type="open_tab", tab=tab))
+            return result, actions, summary
+
+        if tool_name == "chart_build_tool":
+            chart_type = data.get("chartType", "line")
+            x_key = data.get("xKey", "")
+            y_keys = data.get("yKeys") or []
+            title = data.get("title", "")
+            stats = data.get("stats", {})
+            row_count = data.get("row_count", "?")
+            chart_config: dict = {
+                "chartType": chart_type,
+                "xKey": x_key,
+                "yKeys": y_keys,
+                "title": title,
+                "stats": stats,
+            }
+            summary = f"차트 생성: {chart_type}"
+            if title:
+                summary += f" — {title}"
+            if row_count != "?":
+                summary += f" ({row_count}건)"
+            actions.append(ChatAction(type="open_tab", tab="chart"))
+            return ToolResult(chart=chart_config, summary=summary), actions, summary
+
+    except Exception:
+        pass
+    return None, [], summary
 
 logger = logging.getLogger(__name__)
 
