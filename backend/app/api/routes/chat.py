@@ -48,7 +48,7 @@ async def chat(
     # 로그인 상태이고 DB가 사용 가능할 때만 대화 기록 저장
     if user and db is not None:
         try:
-            await _save_messages(db, user["sub"], request, response)
+            await _save_messages(db, user["id"], request, response)
         except Exception as e:
             logger.warning(f"대화 기록 저장 실패 (무시): {e}")
 
@@ -69,6 +69,7 @@ async def chat_stream(
 
     async def generate():
         final_data = None
+        tokens = []
         try:
             async for event_json in stream_coordinator(
                 message=request.message,
@@ -78,7 +79,9 @@ async def chat_stream(
                 yield f"data: {event_json}\n\n"
                 try:
                     event = json.loads(event_json)
-                    if event.get("type") == "done":
+                    if event.get("type") == "token":
+                        tokens.append(event.get("content", ""))
+                    elif event.get("type") == "done":
                         final_data = event
                 except Exception:
                     pass
@@ -87,16 +90,20 @@ async def chat_stream(
         finally:
             yield "data: [DONE]\n\n"
 
-        # 스트리밍 완료 후 대화 기록 저장
-        if final_data and user and db is not None:
+        # 스트리밍 완료 후 대화 기록 저장 (Depends 세션이 닫혀있으므로 새 세션 사용)
+        if final_data and user:
             try:
-                from app.schemas.chat import ChatResponse, ToolResult, ChatAction
+                from app.schemas.chat import ChatResponse, ToolResult, ChatAction, StepInfo
+                from app.core.database import AsyncSessionLocal
                 response = ChatResponse(
-                    message="",  # 저장 시 content는 별도로 처리
+                    message="".join(tokens),
                     actions=[ChatAction(**a) for a in (final_data.get("actions") or [])],
                     tool_results=ToolResult(**(final_data.get("tool_results") or {})),
+                    steps=[StepInfo(**s) for s in (final_data.get("steps") or [])],
+                    reasoning=final_data.get("reasoning"),
                 )
-                await _save_messages(db, user["sub"], request, response)
+                async with AsyncSessionLocal() as fresh_db:
+                    await _save_messages(fresh_db, user["id"], request, response)
             except Exception as e:
                 logger.warning(f"스트리밍 대화 기록 저장 실패: {e}")
 
@@ -153,6 +160,8 @@ async def _save_messages(
         content=response.message,
         actions=[a.model_dump() for a in response.actions] if response.actions else None,
         tool_results=response.tool_results.model_dump() if response.tool_results else None,
+        steps=[s.model_dump() for s in response.steps] if response.steps else None,
+        reasoning=response.reasoning or None,
     ))
 
     await db.commit()

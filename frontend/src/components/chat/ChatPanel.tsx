@@ -44,23 +44,25 @@ function ActionChip({ action, onApply }: { action: ChatAction; onApply: () => vo
 
 // ─── 추론 항목 (타이머 + 개별 접기) ─────────────────────────────────────────
 
-function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean }) {
-  const [open, setOpen] = useState(true)
+function ThoughtItem({ text, isStreaming, durationS, noTime }: { text: string; isStreaming: boolean; durationS?: number; noTime?: boolean }) {
+  const [open, setOpen] = useState(isStreaming)
   const [seconds, setSeconds] = useState(0)
-  const frozenRef = useRef(false)
+  const displaySeconds = isStreaming ? seconds : (durationS !== undefined ? durationS : (seconds > 0 ? seconds : Math.max(1, Math.round(text.length / 10))))
 
-  // 스트리밍 중 초 카운트, 완료 시 freeze
   useEffect(() => {
     if (!isStreaming) {
-      frozenRef.current = true
       setOpen(false)
       return
     }
-    const id = setInterval(() => {
-      if (!frozenRef.current) setSeconds(s => s + 1)
-    }, 1000)
+    const id = setInterval(() => setSeconds(s => s + 1), 1000)
     return () => clearInterval(id)
   }, [isStreaming])
+
+  const label = isStreaming
+    ? `Thinking… ${seconds}s`
+    : noTime
+    ? 'Thought'
+    : `Thought for ${displaySeconds}s`
 
   return (
     <div className="flex-1 min-w-0">
@@ -68,9 +70,9 @@ function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean
         onClick={() => setOpen(o => !o)}
         className="flex items-center gap-1 text-foreground/75 hover:text-foreground transition-colors text-left"
       >
-          <span className="font-medium">Thought for {seconds}s</span>
-          <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
-          {isStreaming && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-0.5 shrink-0" />}
+        <span className="font-medium">{label}</span>
+        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {isStreaming && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground/50 ml-0.5 shrink-0" />}
       </button>
       {open && (
         <div className="mt-1 text-muted-foreground/60 whitespace-pre-wrap break-words leading-relaxed">
@@ -88,27 +90,41 @@ function ThoughtItem({ text, isStreaming }: { text: string; isStreaming: boolean
 
 function TimelineRow({
   dot,
+  isFirst,
   isLast,
   children,
 }: {
   dot: React.ReactNode
+  isFirst: boolean
   isLast: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className="flex gap-2.5 items-start">
-      {/* 왼쪽: 불릿 + 점선 */}
-      <div className="flex flex-col items-center shrink-0" style={{ width: 10 }}>
-        <div style={{ marginTop: 5 }}>{dot}</div>
-        {!isLast && (
-          <div
-            className="flex-1 mt-1"
-            style={{ width: 0, minHeight: 10, borderLeft: '1.5px dashed hsl(var(--border) / 0.5)' }}
-          />
-        )}
+    <div className="relative flex gap-2.5 items-start">
+      {!isFirst && (
+        <div
+          className="absolute top-0 w-px rounded-full bg-foreground/18"
+          style={{
+            left: 5.5,
+            height: 9,
+          }}
+        />
+      )}
+      {!isLast && (
+        <div
+          className="absolute bottom-0 w-px rounded-full bg-foreground/18"
+          style={{
+            left: 5.5,
+            top: 9,
+          }}
+        />
+      )}
+      {/* 왼쪽: 불릿 */}
+      <div className="relative z-10 flex w-3 shrink-0 justify-center pt-[5px]">
+        {dot}
       </div>
       {/* 오른쪽: 내용 */}
-      <div className="flex-1 min-w-0 pb-2">{children}</div>
+      <div className="flex-1 min-w-0 pb-3">{children}</div>
     </div>
   )
 }
@@ -156,38 +172,82 @@ function ToolItem({ step, isStreaming }: { step: StepInfo; isStreaming: boolean 
 function StepsList({
   steps,
   preContent,
+  finalReasoning,
+  finalReasoningDurationMs,
+  liveReasoning,
   isStreaming = false,
 }: {
   steps: StepInfo[]
   preContent?: string
+  finalReasoning?: string       // 모든 tool 완료 후 최종 추론 (영구)
+  finalReasoningDurationMs?: number
+  liveReasoning?: string | null // 스트리밍 중 실시간 추론 토큰
   isStreaming?: boolean
 }) {
-  if (!steps.length && !preContent) return null
+  const [open, setOpen] = useState(isStreaming)
 
-  // 타임라인 아이템 목록 구성
+  useEffect(() => {
+    if (isStreaming) setOpen(true)
+  }, [isStreaming])
+
+  // 표시할 항목이 아무것도 없으면 렌더링 안 함
+  const hasContent = steps.length > 0 || preContent || finalReasoning || liveReasoning
+  if (!hasContent) return null
+
+  // ── 타임라인 아이템 순서대로 구성 ──────────────────────────────────────────
+  // 시간 흐름: preContent? → [step.reasoning? → tool]* → liveReasoning? → finalReasoning?
   type TItem =
     | { kind: 'pre'; text: string }
-    | { kind: 'thought'; text: string; stepIdx: number }
-    | { kind: 'tool'; step: StepInfo; stepIdx: number }
+    | { kind: 'thought'; text: string; live?: boolean; durationS?: number; noTime?: boolean }
+    | { kind: 'tool'; step: StepInfo }
 
   const items: TItem[] = []
-  steps.forEach((step, i) => {
-    if (i === 0 && preContent) items.push({ kind: 'pre', text: preContent })
-    if (step.reasoning) items.push({ kind: 'thought', text: step.reasoning, stepIdx: i })
-    items.push({ kind: 'tool', step, stepIdx: i })
+
+  // 툴 호출 전 텍스트 (비thinking 모델)
+  if (preContent) items.push({ kind: 'pre', text: preContent })
+
+  // 각 step: 해당 step 직전 reasoning → tool
+  steps.forEach((step) => {
+    if (step.reasoning) {
+      const ds = step.durationMs !== undefined ? Math.max(1, Math.round(step.durationMs / 1000)) : undefined
+      items.push({ kind: 'thought', text: step.reasoning, durationS: ds })
+    }
+    items.push({ kind: 'tool', step })
   })
-  // steps가 없고 preContent만 있을 때
-  if (!steps.length && preContent) items.push({ kind: 'pre', text: preContent })
+
+  // 스트리밍 중 실시간 최종 추론 (모든 tool 완료 후)
+  if (liveReasoning) items.push({ kind: 'thought', text: liveReasoning, live: true })
+
+  // 완료 후 저장된 최종 추론
+  if (!isStreaming && finalReasoning) {
+    const ds = finalReasoningDurationMs !== undefined
+      ? Math.max(1, Math.round(finalReasoningDurationMs / 1000))
+      : undefined
+    items.push({ kind: 'thought', text: finalReasoning, durationS: ds })
+  }
+
+  // 접힘 상태 요약 텍스트
+  const toolNames = steps.map(s => s.tool).join(', ')
+  const collapsedLabel = toolNames || (finalReasoning ? '추론 과정' : '생각 중...')
 
   return (
     <div className="text-xs flex flex-col mb-1 w-full">
-      {items.map((item, idx) => {
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors mb-1"
+      >
+        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {!open && <span className="truncate">{collapsedLabel}</span>}
+      </button>
+      {open && items.map((item, idx) => {
+        const isFirst = idx === 0
         const isLast = idx === items.length - 1
         if (item.kind === 'pre') {
           return (
             <TimelineRow
               key={`pre-${idx}`}
               dot={<span className="block w-1.5 h-1.5 rounded-full bg-foreground/50" />}
+              isFirst={isFirst}
               isLast={isLast}
             >
               <p className="text-muted-foreground/65 whitespace-pre-wrap break-words leading-relaxed">
@@ -197,17 +257,14 @@ function StepsList({
           )
         }
         if (item.kind === 'thought') {
-          const step = steps[item.stepIdx]
           return (
             <TimelineRow
               key={`thought-${idx}`}
               dot={<span className="block w-2 h-2 rounded-full bg-foreground" />}
+              isFirst={isFirst}
               isLast={isLast}
             >
-              <ThoughtItem
-                text={item.text}
-                isStreaming={isStreaming && step.output === '...'}
-              />
+              <ThoughtItem text={item.text} isStreaming={!!item.live && isStreaming} durationS={item.durationS} noTime={item.noTime} />
             </TimelineRow>
           )
         }
@@ -216,6 +273,7 @@ function StepsList({
           <TimelineRow
             key={`tool-${idx}`}
             dot={<span className="block w-2 h-2 rounded-full bg-green-500" />}
+            isFirst={isFirst}
             isLast={isLast}
           >
             <ToolItem step={item.step} isStreaming={isStreaming} />
@@ -234,12 +292,15 @@ interface MessageBubbleProps {
   preContent?: string
   actions?: ChatAction[]
   steps?: StepInfo[]
+  reasoning?: string | null
+  finalReasoning?: string
+  finalReasoningDurationMs?: number
   isStreaming?: boolean
   streamingStatus?: string | null
   onAction: (action: ChatAction) => void
 }
 
-function MessageBubble({ role, content, preContent, actions, steps, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
+function MessageBubble({ role, content, preContent, actions, steps, reasoning, finalReasoning, finalReasoningDurationMs, isStreaming, streamingStatus, onAction }: MessageBubbleProps) {
   const isUser = role === 'user'
 
   if (isUser) {
@@ -255,10 +316,15 @@ function MessageBubble({ role, content, preContent, actions, steps, isStreaming,
   // assistant
   return (
     <div className="flex flex-col gap-1">
-        {/* 추론/도구 단계 (preContent 포함) */}
-        {((steps?.length ?? 0) > 0 || preContent) && (
-          <StepsList steps={steps ?? []} preContent={preContent} isStreaming={isStreaming} />
-        )}
+        {/* 추론/도구 단계 타임라인 */}
+        <StepsList
+          steps={steps ?? []}
+          preContent={preContent}
+          finalReasoning={finalReasoning}
+          finalReasoningDurationMs={finalReasoningDurationMs}
+          liveReasoning={reasoning}
+          isStreaming={isStreaming}
+        />
 
         {/* 상태 표시 — 주황색 아이콘 + 텍스트, 답변 시작 후 사라짐 */}
         {isStreaming && !content && streamingStatus && (
@@ -414,13 +480,15 @@ export function ChatPanel() {
     setStreamingStatus('생각 중...')
     const liveSteps: StepInfo[] = []
     let liveReasoning = ''
-    let pendingStepReasoning = ''
     let stepsStarted = false   // 첫 step_start 이후 true
     let stepsFinished = false  // 마지막 step_end 이후 true (다음 token은 최종 답변)
+    let reasoningStartTs = 0   // reasoning_token 첫 수신 시각 (0 = 아직 미측정)
+    let finalReasoningDurationMs: number | undefined
 
     try {
       for await (const event of streamChatMessage(text, history, context)) {
         if (event.type === 'reasoning_token') {
+          if (reasoningStartTs === 0) reasoningStartTs = Date.now()
           liveReasoning += event.content
           updateMessage(assistantId, { reasoning: liveReasoning })
         } else if (event.type === 'token') {
@@ -442,14 +510,19 @@ export function ChatPanel() {
           stepsStarted = true
           stepsFinished = false
           setStreamingStatus(`도구 호출 중: ${event.tool}`)
-          pendingStepReasoning = liveReasoning
-          liveReasoning = ''  // 다음 step을 위해 초기화
+          // event.reasoning: 서버가 이미 확정한 reasoning (<think> 태그 방식 포함)
+          // liveReasoning: reasoning_token 스트림으로 실시간 누적된 reasoning
+          const stepReasoning = event.reasoning || liveReasoning || undefined
+          const stepDurationMs = event.reasoning_duration_ms ?? (reasoningStartTs > 0 ? Date.now() - reasoningStartTs : undefined)
+          liveReasoning = ''       // 다음 step을 위해 초기화
+          reasoningStartTs = 0    // 다음 reasoning 측정을 위해 초기화
           const step: StepInfo = {
             tool: event.tool,
             tool_key: event.tool_key,
             input: event.input,
             output: '...',
-            reasoning: pendingStepReasoning || undefined,
+            reasoning: stepReasoning,
+            durationMs: stepDurationMs,
           }
           liveSteps.push(step)
           updateMessage(assistantId, { steps: [...liveSteps], reasoning: null })
@@ -474,11 +547,17 @@ export function ChatPanel() {
             })
           }
 
+          finalReasoningDurationMs = event.reasoning_duration_ms ?? (reasoningStartTs > 0 ? Date.now() - reasoningStartTs : undefined)
+          reasoningStartTs = 0
+
           updateMessage(assistantId, {
             actions,
             steps: [...liveSteps],
             toolResults: toolResults ?? undefined,
             reasoning: null,
+            // done.reasoning = 마지막 round의 reasoning (tool이 없는 최종 추론)
+            finalReasoning: event.reasoning || undefined,
+            finalReasoningDurationMs,
           })
 
           // tool 결과 반영
@@ -528,6 +607,8 @@ export function ChatPanel() {
           role: m.role as 'user' | 'assistant',
           content: m.content,
           actions: (m.actions ?? []) as ChatAction[],
+          steps: (m.steps ?? []) as StepInfo[],
+          finalReasoning: m.reasoning ?? undefined,
         })
       }
     } catch (err) {
@@ -604,6 +685,9 @@ export function ChatPanel() {
               preContent={msg.preContent}
               actions={msg.actions}
               steps={msg.steps}
+              reasoning={msg.id === streamingMessageId ? msg.reasoning : null}
+              finalReasoning={msg.finalReasoning}
+              finalReasoningDurationMs={msg.finalReasoningDurationMs}
               isStreaming={msg.id === streamingMessageId}
               streamingStatus={msg.id === streamingMessageId ? streamingStatus : null}
               onAction={handleAction}

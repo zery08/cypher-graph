@@ -251,12 +251,24 @@ def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, 
             row_count = data.get("row_count", "?")
             cypher = data.get("cypher", "")
             summary = f"{row_count}건 반환"
+            if data.get("empty_result"):
+                summary = "조회 결과 0건"
             if cypher:
                 summary += f"\n```cypher\n{cypher}\n```"
                 actions.append(ChatAction(type="apply_query", query=cypher))
+            if data.get("followup_hint"):
+                summary += f"\n후속 제안: {data['followup_hint']}"
             tab = "graph" if data.get("nodes") else "table"
             actions.append(ChatAction(type="open_tab", tab=tab))
             return result, actions, summary
+
+        if tool_name == "graph_schema_tool":
+            labels = data.get("node_labels", [])
+            rels = data.get("relationship_types", [])
+            summary = data.get("summary") or (
+                f"스키마 확인: 라벨 {len(labels)}개, 관계 {len(rels)}개"
+            )
+            return ToolResult(summary=summary), actions, summary
 
         if tool_name == "table_summary_tool":
             columns = data.get("columns", [])

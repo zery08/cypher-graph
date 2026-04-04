@@ -14,13 +14,10 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession | None:
-    """FastAPI Depends용 DB 세션 제공자. DB 연결 불가 시 None을 반환한다."""
-    try:
-        async with AsyncSessionLocal() as session:
-            yield session
-    except Exception:
-        yield None
+async def get_db() -> AsyncSession:
+    """FastAPI Depends용 DB 세션 제공자."""
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 async def init_db() -> None:

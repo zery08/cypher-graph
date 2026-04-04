@@ -36,7 +36,14 @@ export async function sendChatMessage(
 // ─── SSE 스트리밍 이벤트 타입 ───────────────────────────────────────────────
 
 export type StreamEvent =
-  | { type: 'step_start'; tool: string; tool_key: string; input: string }
+  | {
+      type: 'step_start'
+      tool: string
+      tool_key: string
+      input: string
+      reasoning?: string | null
+      reasoning_duration_ms?: number | null
+    }
   | { type: 'step_end'; tool_key: string; output: string }
   | { type: 'reasoning_token'; content: string }
   | { type: 'token'; content: string }
@@ -46,6 +53,7 @@ export type StreamEvent =
       tool_results: ToolResult
       steps: StepInfo[]
       reasoning?: string | null
+      reasoning_duration_ms?: number | null
     }
   | { type: 'error'; content: string }
 
@@ -126,6 +134,8 @@ export interface ConversationMessage {
   content: string
   actions?: unknown[]
   tool_results?: unknown
+  steps?: unknown[]
+  reasoning?: string | null
   created_at: string
 }
 

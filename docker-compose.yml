@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rcp-cypher-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rcp_cypher
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rcp_cypher"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   neo4j:
     image: neo4j:5
     container_name: graph-chat-neo4j
@@ -24,3 +41,4 @@ services:
 
 volumes:
   neo4j_data:
+  postgres_data:

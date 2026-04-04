@@ -7,11 +7,13 @@ export interface ChatEntry {
   id: string
   role: 'user' | 'assistant'
   content: string
-  preContent?: string       // 툴 호출 전 LLM이 내뱉은 텍스트
+  preContent?: string         // 툴 호출 전 LLM이 내뱉은 텍스트 (비thinking 모델)
   actions?: ChatAction[]
   steps?: StepInfo[]
   toolResults?: ToolResult
-  reasoning?: string | null
+  reasoning?: string | null   // 스트리밍 중 실시간 reasoning 토큰 (live only)
+  finalReasoning?: string     // 모든 tool 완료 후 최종 추론 (영구 보존)
+  finalReasoningDurationMs?: number
   timestamp: number
 }
 

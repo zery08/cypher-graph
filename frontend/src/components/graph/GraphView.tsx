@@ -11,15 +11,15 @@ cytoscape.use(fcose)
 // ─── 레이블별 색상 ────────────────────────────────────────────────────────────
 
 const LABEL_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  Wafer:     { bg: '#4c8edd', border: '#6aadff', text: '#ffffff' },
-  Recipe:    { bg: '#8b5cf6', border: '#a78bfa', text: '#ffffff' },
-  Lot:       { bg: '#10b981', border: '#34d399', text: '#ffffff' },
-  Step:      { bg: '#f59e0b', border: '#fcd34d', text: '#1c1917' },
-  Chamber:   { bg: '#ef4444', border: '#fca5a5', text: '#ffffff' },
-  Metrology: { bg: '#ec4899', border: '#f9a8d4', text: '#ffffff' },
-  Parameter: { bg: '#06b6d4', border: '#67e8f9', text: '#ffffff' },
+  Wafer:     { bg: '#cfe8ff', border: '#a8d4ff', text: '#334155' },
+  Recipe:    { bg: '#ddd6fe', border: '#c4b5fd', text: '#4338ca' },
+  Lot:       { bg: '#d7f5e7', border: '#a7ebc9', text: '#166534' },
+  Step:      { bg: '#fee8bd', border: '#f6cf7a', text: '#92400e' },
+  Chamber:   { bg: '#ffd9d6', border: '#ffb5ae', text: '#991b1b' },
+  Metrology: { bg: '#f8c5d8', border: '#f2a7c4', text: '#831843' },
+  Parameter: { bg: '#cff5f8', border: '#9fe7ee', text: '#155e75' },
 }
-const DEFAULT_COLOR = { bg: '#64748b', border: '#94a3b8', text: '#ffffff' }
+const DEFAULT_COLOR = { bg: '#e2e8f0', border: '#cbd5e1', text: '#334155' }
 
 function getColor(labels: string[]) {
   for (const l of labels) if (LABEL_COLORS[l]) return LABEL_COLORS[l]
@@ -53,63 +53,74 @@ const CY_STYLE: any[] = [
       'shape': 'ellipse',
       'background-color': 'data(bg)',
       'border-color': 'data(border)',
-      'border-width': 3,
-      'border-opacity': 0.6,
-      'width': 68,
-      'height': 68,
+      'border-width': 0,
+      'border-opacity': 0,
+      'width': 92,
+      'height': 92,
       'label': 'data(label)',
       'color': 'data(textColor)',
-      'font-size': 11,
-      'font-weight': 600,
-      'font-family': 'ui-sans-serif, system-ui, sans-serif',
+      'font-size': 10,
+      'font-weight': 500,
+      'font-family': 'Geist Variable, ui-sans-serif, system-ui, sans-serif',
       'text-valign': 'center',
       'text-halign': 'center',
-      'text-max-width': 60,
+      'text-max-width': 74,
       'text-wrap': 'wrap',
       'min-zoomed-font-size': 6,
       'overlay-opacity': 0,
-    },
-  },
-  {
-    selector: 'node:selected',
-    style: {
-      'border-width': 4,
-      'border-color': '#f8fafc',
-      'border-opacity': 1,
-      'overlay-opacity': 0,
-      'shadow-blur': 16,
-      'shadow-color': 'data(border)',
-      'shadow-opacity': 0.9,
+      'shadow-blur': 0,
+      'shadow-color': '#64748b',
+      'shadow-opacity': 0,
       'shadow-offset-x': 0,
       'shadow-offset-y': 0,
     },
   },
   {
+    selector: 'node:selected',
+    style: {
+      'border-width': 0,
+      'border-color': 'data(textColor)',
+      'border-opacity': 0,
+      'overlay-opacity': 0,
+      'shadow-blur': 16,
+      'shadow-color': '#64748b',
+      'shadow-opacity': 0.14,
+      'shadow-offset-x': 0,
+      'shadow-offset-y': 6,
+    },
+  },
+  {
     selector: 'edge',
     style: {
-      'line-color': '#334155',
-      'target-arrow-color': '#475569',
+      'line-color': '#a8b2c2',
+      'target-arrow-color': '#a8b2c2',
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.9,
+      'arrow-scale': 0.85,
       'curve-style': 'bezier',
-      'width': 1.2,
-      'line-opacity': 0.5,
+      'width': 1.35,
+      'line-opacity': 0.9,
       'label': 'data(label)',
-      'font-size': 9,
-      'font-family': 'ui-sans-serif, system-ui, sans-serif',
-      'color': '#64748b',
+      'font-size': 8,
+      'font-weight': 500,
+      'font-family': 'Geist Variable, ui-sans-serif, system-ui, sans-serif',
+      'color': '#7c8798',
       'text-rotation': 'autorotate',
-      'text-background-opacity': 0,
+      'text-background-opacity': 0.9,
+      'text-background-color': '#ffffff',
+      'text-background-shape': 'roundrectangle',
+      'text-background-padding': 2,
       'min-zoomed-font-size': 8,
       'overlay-opacity': 0,
+      'source-endpoint': 'outside-to-node',
+      'target-endpoint': 'outside-to-node',
     },
   },
   {
     selector: 'edge:selected',
     style: {
-      'line-color': '#475569',
-      'target-arrow-color': '#475569',
-      'width': 2,
+      'line-color': '#64748b',
+      'target-arrow-color': '#64748b',
+      'width': 2.2,
       'line-opacity': 0.9,
       'overlay-opacity': 0,
     },
@@ -121,9 +132,9 @@ const CY_STYLE: any[] = [
   {
     selector: '.highlighted',
     style: {
-      'line-color': '#475569',
-      'target-arrow-color': '#475569',
-      'width': 2,
+      'line-color': '#64748b',
+      'target-arrow-color': '#64748b',
+      'width': 2.2,
       'line-opacity': 0.85,
       'overlay-opacity': 0,
     },
@@ -131,10 +142,15 @@ const CY_STYLE: any[] = [
   {
     selector: '.neighbor',
     style: {
-      'border-width': 3,
-      'border-color': '#f8fafc',
-      'border-opacity': 0.5,
+      'border-width': 0,
+      'border-color': 'data(textColor)',
+      'border-opacity': 0,
       'overlay-opacity': 0,
+      'shadow-blur': 14,
+      'shadow-color': '#64748b',
+      'shadow-opacity': 0.1,
+      'shadow-offset-x': 0,
+      'shadow-offset-y': 5,
     },
   },
 ]
@@ -145,6 +161,13 @@ export function GraphView() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const { graphResult, setSelection, focusNodeId, setFocusNodeId } = useWorkspaceStore()
+
+  // HMR이나 스타일 수정 시 기존 cytoscape 인스턴스에도 최신 스타일을 다시 적용
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    ;(cy.style() as any).fromJson(CY_STYLE).update()
+  })
 
   // 컨테이너 크기 변화 감지 → cy.resize() 호출
   useEffect(() => {
