@@ -280,16 +280,30 @@ def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, 
                 summary += f", 수치 컬럼 {len(numeric_stats)}개"
             return ToolResult(summary=summary), actions, summary
 
-        if tool_name == "chart_recommendation_tool":
-            chart_type = data.get("chart_type", "line")
-            reason = data.get("reason", "")
-            raw_config = data.get("config") or {}
-            chart_config = {"chartType": chart_type, **raw_config}
-            if raw_config.get("xAxis") and not chart_config.get("xKey"):
-                chart_config["xKey"] = raw_config["xAxis"]
-            if raw_config.get("yAxis") and not chart_config.get("yKey"):
-                chart_config["yKey"] = raw_config["yAxis"]
-            summary = f"차트 추천: {chart_type}" + (f" - {reason}" if reason else "")
+        if tool_name in ("chart_recommendation_tool", "chart_build_tool"):
+            chart_type = data.get("chartType") or data.get("chart_type", "line")
+            x_key = data.get("xKey") or data.get("xAxis", "")
+            y_keys = data.get("yKeys") or []
+            title = data.get("title", "")
+            stats = data.get("stats", {})
+            row_count = data.get("row_count", "?")
+
+            # 구형 chart_recommendation_tool 호환
+            if not x_key and isinstance(data.get("config"), dict):
+                x_key = data["config"].get("xAxis", "")
+
+            chart_config: dict = {
+                "chartType": chart_type,
+                "xKey": x_key,
+                "yKeys": y_keys,
+                "title": title,
+                "stats": stats,
+            }
+            summary = f"차트 생성: {chart_type}"
+            if title:
+                summary += f" — {title}"
+            if row_count != "?":
+                summary += f" ({row_count}건)"
             actions.append(ChatAction(type="open_tab", tab="chart"))
             return ToolResult(chart=chart_config, summary=summary), actions, summary
 

@@ -41,8 +41,10 @@ export function ChartView() {
   const numericCols = useMemo(() => getNumericColumns(tableRows), [tableRows])
   const stringCols = useMemo(() => getStringColumns(tableRows), [tableRows])
 
-  const xKey = chartConfig?.xKey as string | undefined ?? stringCols[0] ?? numericCols[0]
-  const chartType = chartConfig?.chartType as string | undefined ?? 'line'
+  const xKey = (chartConfig?.xKey as string | undefined) ?? stringCols[0] ?? numericCols[0]
+  const chartType = (chartConfig?.chartType as string | undefined) ?? 'line'
+  const chartTitle = chartConfig?.title as string | undefined
+  const configYKeys = chartConfig?.yKeys as string[] | undefined
 
   // ── 빈 상태 ──────────────────────────────────────────────────────────────
   if (tableRows.length === 0) {
@@ -75,11 +77,18 @@ export function ChartView() {
     return point
   })
 
-  const yKeys = numericCols.filter((k) => k !== xKey).slice(0, 5)
+  // chart_build_tool이 내려준 yKeys 우선 사용, 없으면 자동 감지
+  const yKeys = (configYKeys && configYKeys.length > 0)
+    ? configYKeys.filter(k => numericCols.includes(k))
+    : numericCols.filter((k) => k !== xKey).slice(0, 5)
 
   // ── 차트 렌더 ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full p-3 gap-3">
+      {/* 차트 제목 */}
+      {chartTitle && (
+        <div className="text-sm font-medium text-foreground/80 shrink-0">{chartTitle}</div>
+      )}
       {/* 요약 카드 */}
       <div className="flex gap-2 overflow-x-auto shrink-0">
         {yKeys.map((key) => {
