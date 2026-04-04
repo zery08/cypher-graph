@@ -5,6 +5,7 @@ GraphCypherQAChain.from_llm 을 사용하여 자연어 → Cypher → 결과를 
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from langchain_neo4j import GraphCypherQAChain
@@ -42,6 +43,15 @@ TOOL_SPEC = {
 }
 
 _chain_instance: GraphCypherQAChain | None = None
+
+# LLM 컨텍스트에 넣지 않을 전체 결과를 임시 보관하는 side store
+# coordinator가 ToolMessage를 처리할 때 result_id로 꺼내 쓴다.
+_result_store: dict[str, dict] = {}
+
+
+def get_full_result(result_id: str) -> dict | None:
+    """result_id로 전체 페이로드를 꺼내고 store에서 제거한다."""
+    return _result_store.pop(result_id, None)
 
 
 def _preview_text(value: Any, limit: int = 300) -> str:
@@ -297,29 +307,39 @@ def run(args: dict) -> str:
             f"used_fallback_cypher={used_fallback_cypher}"
         )
 
-        payload = {
+        # 전체 데이터를 side store에 보관 (LLM 컨텍스트에는 넣지 않음)
+        result_id = uuid.uuid4().hex[:12]
+        _result_store[result_id] = {
             "cypher": cypher,
             "nodes": [n.model_dump() for n in graph_result.nodes],
             "edges": [e.model_dump() for e in graph_result.edges],
             "result": raw_result[: settings.max_query_results],
             "answer": answer,
             "row_count": len(raw_result),
-            "execution_time_ms": elapsed_ms,
-            "source": source,
-            "used_fallback_cypher": used_fallback_cypher,
+            "empty_result": len(raw_result) == 0,
             "needs_followup": needs_followup,
             "followup_hint": followup_hint,
+        }
+
+        # LLM이 볼 compact 요약만 반환 (answer + cypher + row_count + 미리보기 3건)
+        compact = {
+            "result_id": result_id,
+            "answer": answer,
+            "cypher": cypher,
+            "row_count": len(raw_result),
+            "preview": raw_result[:3],
             "empty_result": len(raw_result) == 0,
-            "notes": notes,
+            "needs_followup": needs_followup,
+            "followup_hint": followup_hint,
         }
         total_elapsed_ms = (time.monotonic() - started_at) * 1000
         logger.info(
             f"[graph_cypher_qa_tool] 완료 total_elapsed_ms={total_elapsed_ms:.1f} "
-            f"row_count={payload['row_count']} needs_followup={needs_followup} "
-            f"answer={_preview_text(answer, 500)}"
+            f"row_count={len(raw_result)} result_id={result_id} "
+            f"answer={_preview_text(answer, 300)}"
         )
 
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps(compact, ensure_ascii=False)
     except Exception as e:
         logger.error(f"graph_cypher_qa_tool 실행 실패: {e}", exc_info=True)
         return json.dumps(

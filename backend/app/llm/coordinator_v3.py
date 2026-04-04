@@ -111,6 +111,14 @@ def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, 
             return None, [], f"오류: {data['error']}"
 
         if tool_name == "graph_cypher_qa_tool":
+            # side store에서 전체 데이터 꺼내기 (없으면 compact 데이터로 fallback)
+            result_id = data.get("result_id")
+            if result_id:
+                from app.llm.tools.graph_cypher_tool import get_full_result
+                full = get_full_result(result_id)
+                if full:
+                    data = {**data, **full}  # compact 위에 full을 덮어씀
+
             result = ToolResult(
                 cypher=data.get("cypher", ""),
                 graph={
@@ -118,7 +126,7 @@ def _parse_tool_result(tool_name: str, output: str) -> tuple[ToolResult | None, 
                     "edges": data.get("edges", []),
                     "raw": data.get("result", data.get("raw", [])),
                 },
-                table=data.get("result", data.get("raw", [])),
+                table=data.get("result", data.get("raw", data.get("preview", []))),
                 summary=data.get("answer", ""),
             )
             row_count = data.get("row_count", "?")
